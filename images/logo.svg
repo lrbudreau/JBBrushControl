@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="320" viewBox="0 0 780 320" role="img">
+  <title>JB Brush Control logo</title>
+  <desc>JB Brush Control — Herbicide Application and Tree Service, three trees with shadows</desc>
+
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="4" dy="6" stdDeviation="4" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&amp;family=Lora:wght@600&amp;display=swap');
+    </style>
+  </defs>
+
+  <!-- Tree 1: far left, tallest, darkest -->
+  <g transform="translate(38, 22)" fill="#111111" filter="url(#shadow)">
+    <rect x="47" y="255" width="13" height="38" rx="2"/>
+    <polygon points="4,264 53,162 102,264"/>
+    <polygon points="12,218 53,128 94,218"/>
+    <polygon points="22,178 53,104 84,178"/>
+    <polygon points="30,146 53,78 76,146"/>
+    <polygon points="38,116 53,48 68,116"/>
+  </g>
+
+  <!-- Tree 2: middle -->
+  <g transform="translate(88, 52)" fill="#333333" filter="url(#shadow)">
+    <rect x="40" y="228" width="12" height="32" rx="2"/>
+    <polygon points="4,236 46,148 88,236"/>
+    <polygon points="10,196 46,118 82,196"/>
+    <polygon points="18,162 46,96 74,162"/>
+    <polygon points="26,132 46,70 66,132"/>
+    <polygon points="32,106 46,44 60,106"/>
+  </g>
+
+  <!-- Tree 3: front right, shortest, lightest -->
+  <g transform="translate(136, 78)" fill="#555555" filter="url(#shadow)">
+    <rect x="34" y="204" width="10" height="28" rx="2"/>
+    <polygon points="2,210 39,136 76,210"/>
+    <polygon points="8,174 39,108 70,174"/>
+    <polygon points="14,144 39,84 64,144"/>
+    <polygon points="20,118 39,62 58,118"/>
+    <polygon points="26,96 39,40 52,96"/>
+  </g>
+
+  <!-- JB Brush Control -->
+  <text x="216" y="112"
+    font-family="'Playfair Display', Georgia, serif"
+    font-weight="700"
+    font-size="60"
+    fill="#111111"
+    letter-spacing="-1">JB Brush Control</text>
+
+  <!-- Divider -->
+  <line x1="216" y1="130" x2="755" y2="130" stroke="#111111" stroke-width="1.2" opacity="0.3"/>
+
+  <!-- Herbicide Application -->
+  <text x="216" y="174"
+    font-family="'Lora', Georgia, serif"
+    font-weight="600"
+    font-size="30"
+    fill="#111111">Herbicide Application</text>
+
+  <!-- & Tree Service -->
+  <text x="216" y="214"
+    font-family="'Lora', Georgia, serif"
+    font-weight="600"
+    font-size="30"
+    fill="#111111">&amp; Tree Service</text>
+
+</svg>
