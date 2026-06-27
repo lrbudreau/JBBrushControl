@@ -1,38 +1,90 @@
-import { CONFIG } from '../config';
+// WebAuthn helper for Face ID / fingerprint login
+// Uses the browser's built-in biometric API — no third party needed
 
-// Search Indiana statewide parcel data by address
-export async function lookupParcelByAddress(address) {
-  try {
-    const params = new URLSearchParams({
-      where: `UPPER(SITUS_ADDRESS) LIKE UPPER('%${address.replace(/'/g, "''")}%')`,
-      outFields: 'OWNER_NAME,SITUS_ADDRESS,SITUS_CITY,SITUS_STATE,SITUS_ZIP,STATE_PARCEL_NO,COUNTY_NAME',
-      returnGeometry: false,
-      resultRecordCount: 5,
-      f: 'json',
-    });
+const RP_ID   = 'lrbudreau.github.io';
+const RP_NAME = 'JB Brush Control';
 
-    const res = await fetch(`${CONFIG.INDIANA_PARCELS_URL}?${params}`);
-    const data = await res.json();
-
-    if (!data.features || data.features.length === 0) return [];
-
-    return data.features.map(f => ({
-      ownerName:   f.attributes.OWNER_NAME   || '',
-      address:     f.attributes.SITUS_ADDRESS || '',
-      city:        f.attributes.SITUS_CITY    || '',
-      state:       f.attributes.SITUS_STATE   || 'IN',
-      zip:         f.attributes.SITUS_ZIP     || '',
-      parcelNo:    f.attributes.STATE_PARCEL_NO || '',
-      county:      f.attributes.COUNTY_NAME   || '',
-    }));
-  } catch (e) {
-    console.error('Indiana GIS lookup failed:', e);
-    return [];
-  }
+function bufferToBase64(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
 }
 
-// Clean up owner name formatting (GIS data is often ALL CAPS)
-export function formatOwnerName(name) {
-  if (!name) return '';
-  return name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()).trim();
+function base64ToBuffer(base64) {
+  const binary = atob(base64);
+  const bytes  = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+export function isBiometricAvailable() {
+  return !!(window.PublicKeyCredential && navigator.credentials);
+}
+
+export function hasBiometricRegistered(userID) {
+  return !!localStorage.getItem(`jb_biometric_${userID}`);
+}
+
+// Register biometric for a user after PIN login
+export async function registerBiometric(userID, userName) {
+  if (!isBiometricAvailable()) throw new Error('Biometrics not supported');
+
+  const challenge = new Uint8Array(32);
+  crypto.getRandomValues(challenge);
+
+  const credential = await navigator.credentials.create({
+    publicKey: {
+      challenge,
+      rp: { id: RP_ID, name: RP_NAME },
+      user: {
+        id: new TextEncoder().encode(userID),
+        name: userName,
+        displayName: userName,
+      },
+      pubKeyCredParams: [
+        { alg: -7,   type: 'public-key' }, // ES256
+        { alg: -257, type: 'public-key' }, // RS256
+      ],
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform', // device biometric only
+        userVerification: 'required',
+        residentKey: 'preferred',
+      },
+      timeout: 60000,
+      attestation: 'none',
+    },
+  });
+
+  // Store credential ID for this user
+  const credID = bufferToBase64(credential.rawId);
+  localStorage.setItem(`jb_biometric_${userID}`, credID);
+  return true;
+}
+
+// Authenticate with biometric
+export async function authenticateWithBiometric(userID) {
+  if (!isBiometricAvailable()) throw new Error('Biometrics not supported');
+
+  const credID = localStorage.getItem(`jb_biometric_${userID}`);
+  if (!credID) throw new Error('No biometric registered for this user');
+
+  const challenge = new Uint8Array(32);
+  crypto.getRandomValues(challenge);
+
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      rpId: RP_ID,
+      allowCredentials: [{
+        id: base64ToBuffer(credID),
+        type: 'public-key',
+      }],
+      userVerification: 'required',
+      timeout: 60000,
+    },
+  });
+
+  return !!assertion;
+}
+
+export function clearBiometric(userID) {
+  localStorage.removeItem(`jb_biometric_${userID}`);
 }
