@@ -10,10 +10,19 @@
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <!-- Google API -->
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <title>JB Brush Control</title>
+    <script>
+      // Handle GitHub Pages SPA routing redirect from 404.html
+      (function() {
+        var redirect = sessionStorage.getItem('redirect');
+        if (redirect && redirect !== '/') {
+          sessionStorage.removeItem('redirect');
+          window.history.replaceState(null, null, '/JBBrushControl' + redirect);
+        }
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
