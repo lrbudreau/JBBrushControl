@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script>
+      // GitHub Pages SPA redirect hack
+      // Stores the path and redirects to index.html which React Router picks up
+      var path = window.location.pathname.replace('/JBBrushControl', '');
+      sessionStorage.setItem('redirect', path);
+      window.location.replace('/JBBrushControl/');
+    </script>
+  </head>
+  <body></body>
+</html>
