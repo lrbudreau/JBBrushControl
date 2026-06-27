@@ -1,17 +1,21 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbyq7zpYmGIG5qlX7wYk3xZ-D2L2PShEf9G3H2sqsHXu02DZ9qbbAUpXhQzUITR2EJUUNg/exec';
+import { CONFIG } from './config';
 
 export async function api(action, params = {}, body = null) {
   const token = sessionStorage.getItem('jb_token');
   try {
     if (body !== null) {
-      const res = await fetch(API_URL, {
+      const res = await fetch(CONFIG.API_URL, {
         method: 'POST',
         body: JSON.stringify({ action, token, ...body }),
       });
       return await res.json();
     } else {
-      const qs = new URLSearchParams({ action, ...(token ? { token } : {}), ...params }).toString();
-      const res = await fetch(`${API_URL}?${qs}`);
+      const qs = new URLSearchParams({
+        action,
+        ...(token ? { token } : {}),
+        ...params
+      }).toString();
+      const res = await fetch(`${CONFIG.API_URL}?${qs}`);
       return await res.json();
     }
   } catch (e) {
@@ -19,7 +23,6 @@ export async function api(action, params = {}, body = null) {
   }
 }
 
-// Session storage — clears when browser/tab closes
 export function saveSession(token, user) {
   sessionStorage.setItem('jb_token', token);
   sessionStorage.setItem('jb_user', JSON.stringify(user));
@@ -28,6 +31,7 @@ export function saveSession(token, user) {
 export function clearSession() {
   sessionStorage.removeItem('jb_token');
   sessionStorage.removeItem('jb_user');
+  sessionStorage.removeItem('jb_webauthn');
 }
 
 export function getSession() {
@@ -46,9 +50,4 @@ export function getUser() {
 export function isOwnerOrAdmin() {
   const u = getUser();
   return u && ['owner', 'admin'].includes(u.Role);
-}
-
-export function isOwner() {
-  const u = getUser();
-  return u && u.Role === 'owner';
 }
