@@ -196,7 +196,7 @@ function AdminInvoices() {
     { key:'Status',       label:'Status',       width:90,  render: StatusBadge },
     { key:'PaidDate',     label:'Paid Date',    width:100 },
     { key:'actions',      label:'Actions',      width:180, render: (_, row) => (
-      <div style={{display:'flex',gap:4'}}>
+      <div style={{display:'flex',gap:4}}>
         {row.Status !== 'Paid' && <button className="admin-btn admin-btn-blue admin-btn-sm" onClick={e=>{e.stopPropagation();handleEmail(row);}} disabled={working===row.InvoiceID}>✉️ Email</button>}
         {['Sent','Overdue'].includes(row.Status) && <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();markPaid(row);}}>✅ Paid</button>}
       </div>
