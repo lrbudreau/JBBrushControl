@@ -1,141 +1,90 @@
 import React, { useEffect, useState } from 'react';
-import { api, getUser } from '../api';
+import { api } from '../api';
+import Modal from '../components/Modal';
 import { toast } from '../components/Toast';
 
-export default function ClockPage() {
-  const user = getUser();
-  const [hours, setHours]     = useState([]);
-  const [jobs, setJobs]       = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [working, setWorking] = useState(false);
-  const [openEntry, setOpen]  = useState(null);
-  const [elapsed, setElapsed] = useState('');
-  const [jobID, setJobID]     = useState('');
-  const [notes, setNotes]     = useState('');
+const blank = { Name:'', Phone:'', Email:'', Address:'', City:'', State:'IN', Zip:'', Division:'Spray', Notes:'' };
+
+export default function CustomersPage() {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [modal, setModal]         = useState(null);
+  const [form, setForm]           = useState(blank);
+  const [saving, setSaving]       = useState(false);
+  const [search, setSearch]       = useState('');
+  const [divFilter, setDiv]       = useState('All');
 
   const load = () => {
     setLoading(true);
-    Promise.all([api('getHours'), api('getJobs', { status: 'Scheduled' })]).then(([h, j]) => {
-      if (h.status === 'ok') {
-        setHours(h.data);
-        setOpen(h.data.find(x => x.EmployeeID === user?.UserID && !x.ClockOut) || null);
-      }
-      if (j.status === 'ok') setJobs(j.data);
-      setLoading(false);
-    });
+    api('getCustomers').then(r => { if (r.status === 'ok') setCustomers(r.data); setLoading(false); });
   };
-
   useEffect(() => { load(); }, []);
 
-  // Live timer
-  useEffect(() => {
-    if (!openEntry) { setElapsed(''); return; }
-    const tick = () => {
-      const diff = Date.now() - new Date(openEntry.ClockIn).getTime();
-      const h = Math.floor(diff / 3600000);
-      const m = Math.floor((diff % 3600000) / 60000);
-      const s = Math.floor((diff % 60000) / 1000);
-      setElapsed(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [openEntry]);
+  const f = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
 
-  const clockIn = async () => {
-    setWorking(true);
-    const r = await api('clockIn', {}, { JobID: jobID, Notes: notes });
-    if (r.status === 'ok') { toast('Clocked in! ✅'); load(); setNotes(''); setJobID(''); }
+  const save = async () => {
+    if (!form.Name) return toast('Name is required', 'error');
+    setSaving(true);
+    const r = await api(modal === 'add' ? 'addCustomer' : 'updateCustomer', {}, form);
+    if (r.status === 'ok') { toast('Customer saved!'); load(); setModal(null); }
     else toast(r.message, 'error');
-    setWorking(false);
+    setSaving(false);
   };
 
-  const clockOut = async () => {
-    setWorking(true);
-    const r = await api('clockOut', {}, { JobID: jobID, Notes: notes });
-    if (r.status === 'ok') { toast(`Clocked out — ${r.data.TotalHours} hrs ✅`); load(); setNotes(''); setJobID(''); }
-    else toast(r.message, 'error');
-    setWorking(false);
-  };
-
-  const myHours = hours.filter(h => h.EmployeeID === user?.UserID).slice().reverse().slice(0, 10);
+  const visible = customers
+    .filter(c => divFilter === 'All' || c.Division === divFilter || c.Division === 'Both')
+    .filter(c => !search || c.Name.toLowerCase().includes(search.toLowerCase()) || c.Phone?.includes(search));
 
   return (
     <div className="page">
-      {/* Clock widget */}
-      <div className="clock-widget">
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.6)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          {openEntry ? (
-            <><span className="clock-dot active" />Clocked In</>
-          ) : (
-            <><span className="clock-dot idle" />Not Clocked In</>
-          )}
-        </div>
-        <div className="clock-time">
-          {openEntry ? elapsed || '00:00:00' : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </div>
-        <div className="clock-label">
-          {openEntry
-            ? `Since ${new Date(openEntry.ClockIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-            : new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-          }
-        </div>
+      <input
+        style={{ width:'100%', padding:'12px 14px', border:'2px solid var(--gray-300)', borderRadius:8, fontSize:16, marginBottom:10 }}
+        placeholder="Search customers…" value={search} onChange={e => setSearch(e.target.value)} />
+
+      <div className="row" style={{ marginBottom: 12, gap: 8 }}>
+        {['All','Spray','Tree'].map(d => (
+          <button key={d} className={`btn btn-sm ${divFilter===d?'btn-primary':'btn-outline'}`} onClick={() => setDiv(d)}>{d}</button>
+        ))}
+        <button className="btn btn-primary btn-sm" style={{ marginLeft:'auto' }}
+          onClick={() => { setForm(blank); setModal('add'); }}>+ Add</button>
       </div>
 
-      {/* Job selector */}
-      <div className="form-group">
-        <label>Job (optional)</label>
-        <select value={jobID} onChange={e => setJobID(e.target.value)}>
-          <option value="">— Select a job —</option>
-          {jobs.map(j => (
-            <option key={j.JobID} value={j.JobID}>
-              {j.CustomerName} — {j.Description?.slice(0,40)}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="form-group">
-        <label>Notes</label>
-        <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any notes for this shift…" />
-      </div>
-
-      {/* Big clock button */}
-      {openEntry ? (
-        <button className="big-btn big-btn-red" onClick={clockOut} disabled={working}
-          style={{ justifyContent: 'center', fontSize: 20, minHeight: 80 }}>
-          <span className="btn-icon">⏹</span>
-          <span>{working ? 'Clocking out…' : 'Clock Out'}</span>
-        </button>
-      ) : (
-        <button className="big-btn big-btn-green" onClick={clockIn} disabled={working}
-          style={{ justifyContent: 'center', fontSize: 20, minHeight: 80 }}>
-          <span className="btn-icon">▶</span>
-          <span>{working ? 'Clocking in…' : 'Clock In'}</span>
-        </button>
-      )}
-
-      {/* Recent hours */}
-      <div className="section-heading" style={{ marginTop: 20 }}>My recent hours</div>
       <div className="card">
         {loading ? <div className="card-body"><p className="text-muted">Loading…</p></div>
-        : myHours.length === 0 ? <div className="empty"><p>No hours logged yet.</p></div>
-        : myHours.map(h => (
-          <div key={h.HoursID} className="list-item">
+        : visible.length === 0 ? <div className="empty"><div className="empty-icon">👥</div><p>No customers found.</p></div>
+        : visible.map(c => (
+          <div key={c.CustomerID} className="list-item" onClick={() => { setForm(c); setModal('edit'); }} style={{ cursor:'pointer' }}>
             <div className="list-item-main">
-              <div className="list-item-title">{h.Date}</div>
-              <div className="list-item-sub">
-                {h.ClockIn ? new Date(h.ClockIn).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '—'}
-                {' → '}
-                {h.ClockOut ? new Date(h.ClockOut).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : 'Active'}
-              </div>
+              <div className="list-item-title">{c.Name}</div>
+              <div className="list-item-sub">{c.Phone || c.Email || c.City || '—'}</div>
             </div>
-            {h.ClockOut
-              ? <span style={{ fontWeight: 700, color: 'var(--green-dark)' }}>{h.TotalHours}h</span>
-              : <span className="badge badge-green">Active</span>
-            }
+            {c.Division === 'Spray' ? <span className="div-spray">Spray</span>
+            : c.Division === 'Tree'  ? <span className="div-tree">Tree</span>
+            : <><span className="div-spray">Spray</span> <span className="div-tree">Tree</span></>}
           </div>
         ))}
       </div>
+
+      {modal && (
+        <Modal title={modal==='add'?'Add Customer':'Edit Customer'} onClose={() => setModal(null)} onSave={save} saving={saving}>
+          <div className="form-group"><label>Name *</label><input name="Name" value={form.Name} onChange={f} /></div>
+          <div className="form-group"><label>Division</label>
+            <select name="Division" value={form.Division} onChange={f}>
+              <option>Spray</option><option>Tree</option><option>Both</option>
+            </select>
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label>Phone</label><input name="Phone" value={form.Phone} onChange={f} inputMode="tel" /></div>
+            <div className="form-group"><label>Email</label><input name="Email" value={form.Email} onChange={f} inputMode="email" /></div>
+          </div>
+          <div className="form-group"><label>Address</label><input name="Address" value={form.Address} onChange={f} /></div>
+          <div className="form-row">
+            <div className="form-group"><label>City</label><input name="City" value={form.City} onChange={f} /></div>
+            <div className="form-group"><label>Zip</label><input name="Zip" value={form.Zip} onChange={f} inputMode="numeric" /></div>
+          </div>
+          <div className="form-group"><label>Notes</label><textarea name="Notes" value={form.Notes} onChange={f} /></div>
+        </Modal>
+      )}
     </div>
   );
 }
