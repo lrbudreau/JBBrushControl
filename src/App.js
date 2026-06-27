@@ -10,7 +10,7 @@ import JobsPage     from './pages/JobsPage';
 import CustomersPage from './pages/CustomersPage';
 import EstimatesPage from './pages/EstimatesPage';
 import InvoicesPage from './pages/InvoicesPage';
-import { ExpensesPage, HoursPage, LicensesPage, ReportsPage } from './pages/OtherPages';
+import { ExpensesPage, HoursPage, LicensesPage, ReportsPage } from './pages/OtherPages.js';
 
 // ── Nav config ────────────────────────────────────────────────
 // Employee nav: simple, phone-focused
