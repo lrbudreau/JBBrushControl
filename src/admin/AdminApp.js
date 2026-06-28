@@ -3,29 +3,26 @@ import { api, clearSession, getUser } from '../api';
 import AdminLogin from './AdminLogin';
 import SheetGrid, { StatusBadge, DivisionBadge, CurrencyCell } from './SheetGrid';
 import { toast, ToastContainer, useToast } from '../components/Toast';
+import { downloadInvoicePDF } from '../components/InvoicePDF';
 import './admin.css';
 
-// ── Nav config ────────────────────────────────────────────────
 const NAV = [
   { section: 'Overview' },
   { id: 'dashboard',  label: 'Dashboard',    icon: '📊' },
-
   { section: 'Business' },
   { id: 'invoices',   label: 'Invoices',     icon: '🧾' },
   { id: 'estimates',  label: 'Estimates',    icon: '📋' },
   { id: 'customers',  label: 'Customers',    icon: '👥' },
   { id: 'jobs',       label: 'Jobs',         icon: '🔧' },
-
   { section: 'Operations' },
   { id: 'expenses',   label: 'Expenses',     icon: '💸' },
   { id: 'mileage',    label: 'Mileage',      icon: '🚛' },
   { id: 'hours',      label: 'Hours',        icon: '⏱' },
-  { id: 'chemicals',  label: 'Chemicals',    icon: '🧪' },
+  { id: 'equipment',  label: 'Equipment',    icon: '🚜' },
+  { id: 'vendors',    label: 'Vendors',      icon: '🏪' },
   { id: 'licenses',   label: 'Licenses',     icon: '📄' },
-
   { section: 'Reports' },
   { id: 'tax',        label: 'Tax Summary',  icon: '📅' },
-
   { section: 'Settings' },
   { id: 'users',      label: 'Users',        icon: '👤' },
 ];
@@ -33,8 +30,8 @@ const NAV = [
 const TITLES = {
   dashboard:'Dashboard', invoices:'Invoices', estimates:'Estimates',
   customers:'Customers', jobs:'Jobs', expenses:'Expenses', mileage:'Mileage',
-  hours:'Employee Hours', chemicals:'Chemicals', licenses:'Licenses',
-  tax:'Tax Summary', users:'Users',
+  hours:'Employee Hours', equipment:'Equipment', vendors:'Vendors',
+  licenses:'Licenses', tax:'Tax Summary', users:'Users',
 };
 
 export default function AdminApp() {
@@ -43,8 +40,8 @@ export default function AdminApp() {
   const { toasts }        = useToast();
 
   useEffect(() => {
-    const stored = sessionStorage.getItem('jb_user');
-    const token  = sessionStorage.getItem('jb_token');
+    const stored = localStorage.getItem('jb_user');
+    const token  = localStorage.getItem('jb_token');
     if (stored && token) {
       const u = JSON.parse(stored);
       if (['admin','owner'].includes(u.Role)) setUser(u);
@@ -57,7 +54,6 @@ export default function AdminApp() {
 
   return (
     <div className="admin-wrap">
-      {/* Sidebar */}
       <nav className="admin-sidebar">
         <div className="admin-sidebar-logo">
           <img src="images/logo.svg" alt="JB Brush Control" />
@@ -79,13 +75,9 @@ export default function AdminApp() {
         </div>
       </nav>
 
-      {/* Main */}
       <div className="admin-main">
         <div className="admin-topbar">
           <h2>{TITLES[page] || page}</h2>
-          <div className="admin-topbar-actions">
-            <span style={{ fontSize:12, color:'#6b7280' }}>JB Brush Control Admin</span>
-          </div>
         </div>
         <div className="admin-body">
           {page === 'dashboard'  && <AdminDashboard />}
@@ -96,7 +88,8 @@ export default function AdminApp() {
           {page === 'expenses'   && <AdminExpenses />}
           {page === 'mileage'    && <AdminMileage />}
           {page === 'hours'      && <AdminHours />}
-          {page === 'chemicals'  && <AdminChemicals />}
+          {page === 'equipment'  && <AdminEquipment />}
+          {page === 'vendors'    && <AdminVendors />}
           {page === 'licenses'   && <AdminLicenses />}
           {page === 'tax'        && <AdminTax />}
           {page === 'users'      && <AdminUsers />}
@@ -107,27 +100,112 @@ export default function AdminApp() {
   );
 }
 
+// ── Reusable CRUD modal ───────────────────────────────────────
+function CrudModal({ title, fields, values, onChange, onSave, onClose, saving, danger, saveLabel }) {
+  return (
+    <div className="admin-modal-overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div className="admin-modal">
+        <div className="admin-modal-header">
+          <h3>{title}</h3>
+          <button className="admin-btn admin-btn-outline admin-btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="admin-modal-body">
+          <div className="admin-form-grid">
+            {fields.map(field => (
+              <div key={field.key} className={`admin-field ${field.full ? 'admin-form-full' : ''}`}>
+                <label>{field.label}{field.required ? ' *' : ''}</label>
+                {field.type === 'select' ? (
+                  <select value={values[field.key] ?? ''} onChange={e => onChange(field.key, e.target.value)}>
+                    {field.options.map(o => typeof o === 'string'
+                      ? <option key={o} value={o}>{o}</option>
+                      : <option key={o.value} value={o.value}>{o.label}</option>
+                    )}
+                  </select>
+                ) : field.type === 'textarea' ? (
+                  <textarea value={values[field.key] ?? ''} onChange={e => onChange(field.key, e.target.value)} rows={3} />
+                ) : (
+                  <input type={field.type || 'text'} value={values[field.key] ?? ''}
+                    onChange={e => onChange(field.key, e.target.value)}
+                    placeholder={field.placeholder || ''} />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="admin-modal-footer">
+          <button className="admin-btn admin-btn-outline" onClick={onClose}>Cancel</button>
+          <button className={`admin-btn ${danger ? 'admin-btn-danger' : 'admin-btn-primary'}`}
+            onClick={onSave} disabled={saving}>
+            {saving ? 'Saving…' : saveLabel || 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useSheetData(action, params={}) {
+  const [data, setData]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(() => {
+    setLoading(true);
+    api(action, params).then(r => { if (r.status==='ok') setData(r.data); setLoading(false); });
+  }, [action]);
+  useEffect(() => { load(); }, [load]);
+  return { data, loading, reload: load };
+}
+
+function useCrud({ getAction, addAction, updateAction, deleteAction, idField, enrichRow }) {
+  const { data, loading, reload } = useSheetData(getAction);
+  const [modal, setModal]   = useState(null);
+  const [form, setForm]     = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const openAdd  = (defaults={}) => { setForm(defaults); setModal('add'); };
+  const openEdit = (row) => { setForm({ ...row }); setModal('edit'); };
+
+  const setField = (key, val) => setForm(p => ({ ...p, [key]: val }));
+
+  const save = async () => {
+    setSaving(true);
+    const action = modal === 'add' ? addAction : updateAction;
+    const r = await api(action, {}, form);
+    if (r.status === 'ok') { toast('Saved! ✅'); reload(); setModal(null); }
+    else toast(r.message, 'error');
+    setSaving(false);
+  };
+
+  const remove = async (row) => {
+    if (!deleteAction) return;
+    if (!window.confirm('Are you sure?')) return;
+    const r = await api(deleteAction, {}, { [idField]: row[idField] });
+    if (r.status === 'ok') { toast('Deleted'); reload(); }
+    else toast(r.message, 'error');
+  };
+
+  return { data, loading, reload, modal, setModal, form, setField, saving, openAdd, openEdit, save, remove };
+}
+
 // ── Dashboard ─────────────────────────────────────────────────
 function AdminDashboard() {
   const [data, setData] = useState(null);
-  useEffect(() => { api('getDashboard').then(r => { if (r.status==='ok') setData(r.data); }); }, []);
+  useEffect(() => { api('getDashboard').then(r => { if(r.status==='ok') setData(r.data); }); }, []);
   const month = new Date().toLocaleString('default',{month:'long'});
   if (!data) return <p style={{color:'#6b7280'}}>Loading…</p>;
   return (
     <div>
       <div className="admin-stats">
-        <div className="admin-stat"><div className="admin-stat-label">Revenue · {month}</div><div className="admin-stat-value" style={{color:'#1a4a1a'}}>${(data.revenueThisMonth||0).toLocaleString()}</div><div className="admin-stat-sub">paid invoices</div></div>
+        <div className="admin-stat"><div className="admin-stat-label">Revenue · {month}</div><div className="admin-stat-value" style={{color:'#1a4a1a'}}>${(data.revenueThisMonth||0).toLocaleString()}</div></div>
         <div className="admin-stat amber"><div className="admin-stat-label">Outstanding</div><div className="admin-stat-value" style={{color:'#d97706'}}>${(data.outstandingTotal||0).toLocaleString()}</div><div className="admin-stat-sub">{data.outstandingInvoices||0} invoice(s)</div></div>
-        <div className="admin-stat"><div className="admin-stat-label">Jobs · {month}</div><div className="admin-stat-value">{data.jobsThisMonth||0}</div><div className="admin-stat-sub">Spray {data.sprayJobs||0} · Tree {data.treeJobs||0}</div></div>
-        <div className="admin-stat blue"><div className="admin-stat-label">Expenses · {month}</div><div className="admin-stat-value" style={{color:'#dc2626'}}>${(data.expensesThisMonth||0).toLocaleString()}</div><div className="admin-stat-sub">{data.milesThisMonth||0} miles logged</div></div>
+        <div className="admin-stat"><div className="admin-stat-label">Jobs · {month}</div><div className="admin-stat-value">{data.jobsThisMonth||0}</div></div>
+        <div className="admin-stat blue"><div className="admin-stat-label">Expenses · {month}</div><div className="admin-stat-value" style={{color:'#dc2626'}}>${(data.expensesThisMonth||0).toLocaleString()}</div></div>
       </div>
-
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
         <div style={{background:'white',borderRadius:10,padding:16,boxShadow:'0 1px 3px rgba(0,0,0,0.08)'}}>
           <div style={{fontWeight:700,marginBottom:10}}>🕐 Currently clocked in</div>
           {data.clockedIn?.length > 0
             ? data.clockedIn.map(n => <div key={n} style={{padding:'4px 0',display:'flex',alignItems:'center',gap:8}}><span style={{width:8,height:8,borderRadius:'50%',background:'#4ade80',display:'inline-block'}}></span>{n}</div>)
-            : <p style={{color:'#9ca3af',fontSize:13}}>No one clocked in right now.</p>
+            : <p style={{color:'#9ca3af',fontSize:13}}>No one clocked in.</p>
           }
         </div>
         <div style={{background:'white',borderRadius:10,padding:16,boxShadow:'0 1px 3px rgba(0,0,0,0.08)'}}>
@@ -147,72 +225,115 @@ function AdminDashboard() {
   );
 }
 
-// ── Generic sheet view factory ────────────────────────────────
-function useSheetData(action, params={}) {
-  const [data, setData]     = useState([]);
-  const [loading, setLoading] = useState(true);
-  const load = useCallback(() => {
-    setLoading(true);
-    api(action, params).then(r => { if (r.status==='ok') setData(r.data); setLoading(false); });
-  }, [action]);
-  useEffect(() => { load(); }, [load]);
-  return { data, loading, reload: load };
-}
-
 // ── Invoices ──────────────────────────────────────────────────
 function AdminInvoices() {
   const { data, loading, reload } = useSheetData('getInvoices');
-  const [working, setWorking] = useState(null);
+  const [settings, setSettings]   = useState({});
+  const [paidModal, setPaidModal] = useState(null);
+  const [payForm, setPayForm]     = useState({ PaidDate: today(), PaymentMethod: '', Notes: '' });
+  const [saving, setSaving]       = useState(false);
 
-  const handleEmail = async (inv) => {
-    setWorking(inv.InvoiceID);
+  useEffect(() => { api('getSettings').then(r => { if(r.status==='ok') setSettings(r.data); }); }, []);
+
+  const markPaid = async () => {
+    const r = await api('markPaid', {}, { InvoiceID: paidModal.InvoiceID, ...payForm });
+    if (r.status==='ok') { toast('Marked as paid ✅'); reload(); setPaidModal(null); }
+    else toast(r.message, 'error');
+  };
+
+  const emailInvoice = async (inv) => {
     const r = await api('getMailtoLink', {}, { InvoiceID: inv.InvoiceID });
-    if (r.status === 'ok') {
+    if (r.status==='ok') {
       window.open(r.data.mailtoLink, '_blank');
       setTimeout(async () => {
-        if (window.confirm(`Did you send the email for invoice ${inv.InvoiceID}? Click OK to mark as sent.`)) {
+        if (window.confirm('Did you send the email? Click OK to mark as sent.')) {
           await api('markSent', {}, { InvoiceID: inv.InvoiceID });
-          toast('Invoice marked as sent ✅');
-          reload();
+          toast('Marked as sent ✅'); reload();
         }
       }, 1000);
     } else toast(r.message, 'error');
-    setWorking(null);
-  };
-
-  const markPaid = async (inv) => {
-    const r = await api('markPaid', {}, { InvoiceID: inv.InvoiceID });
-    if (r.status === 'ok') { toast('Invoice marked as paid ✅'); reload(); }
-    else toast(r.message, 'error');
   };
 
   const cols = [
     { key:'InvoiceID',    label:'Invoice #',   width:110 },
-    { key:'CustomerName', label:'Customer',     width:160 },
-    { key:'Division',     label:'Division',     width:80,  render: DivisionBadge },
-    { key:'IssueDate',    label:'Date',         width:100 },
-    { key:'DueDate',      label:'Due',          width:100 },
-    { key:'Total',        label:'Total',        width:100, render: CurrencyCell },
-    { key:'Status',       label:'Status',       width:90,  render: StatusBadge },
-    { key:'PaidDate',     label:'Paid Date',    width:100 },
-    { key:'actions',      label:'Actions',      width:180, render: (_, row) => (
+    { key:'CustomerName', label:'Customer',    width:150 },
+    { key:'Division',     label:'Division',    width:80,  render: DivisionBadge },
+    { key:'IssueDate',    label:'Issued',      width:100 },
+    { key:'DueDate',      label:'Due',         width:100 },
+    { key:'Total',        label:'Total',       width:100, render: CurrencyCell },
+    { key:'Status',       label:'Status',      width:130, render: StatusBadge },
+    { key:'PaidDate',     label:'Paid',        width:100 },
+    { key:'PaymentMethod',label:'Payment',     width:100 },
+    { key:'_actions',     label:'Actions',     width:220, render: (_, row) => (
       <div style={{display:'flex',gap:4}}>
-        {row.Status !== 'Paid' && <button className="admin-btn admin-btn-blue admin-btn-sm" onClick={e=>{e.stopPropagation();handleEmail(row);}} disabled={working===row.InvoiceID}>✉️ Email</button>}
-        {['Sent','Overdue'].includes(row.Status) && <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();markPaid(row);}}>✅ Paid</button>}
+        <button className="admin-btn admin-btn-outline admin-btn-sm" onClick={e=>{e.stopPropagation();downloadInvoicePDF(row, settings);}}>🖨 PDF</button>
+        {row.Status !== 'Paid' && <button className="admin-btn admin-btn-blue admin-btn-sm" style={{background:'var(--blue,#1d6fa4)',color:'white'}} onClick={e=>{e.stopPropagation();emailInvoice(row);}}>✉️</button>}
+        {row.Status === 'Awaiting Payment' && <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();setPaidModal(row);setPayForm({PaidDate:today(),PaymentMethod:'',Notes:''});}}>💵 Paid</button>}
       </div>
     )},
   ];
 
   if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
-  return <SheetGrid data={data} columns={cols} emptyMessage="No invoices yet." />;
+  return (
+    <div>
+      <SheetGrid data={data} columns={cols} emptyMessage="No invoices yet." />
+      {paidModal && (
+        <div className="admin-modal-overlay" onClick={e=>e.target===e.currentTarget&&setPaidModal(null)}>
+          <div className="admin-modal">
+            <div className="admin-modal-header"><h3>Mark Invoice as Paid</h3><button className="admin-btn admin-btn-outline admin-btn-sm" onClick={()=>setPaidModal(null)}>✕</button></div>
+            <div className="admin-modal-body">
+              <p style={{marginBottom:12}}><strong>{paidModal.InvoiceID}</strong> · ${parseFloat(paidModal.Total||0).toFixed(2)} · {paidModal.CustomerName}</p>
+              <div className="admin-form-grid">
+                <div className="admin-field"><label>Payment Method</label>
+                  <select value={payForm.PaymentMethod} onChange={e=>setPayForm(p=>({...p,PaymentMethod:e.target.value}))}>
+                    <option value="">— Select —</option>
+                    {['Cash','Check','Venmo','Zelle','Credit Card','Other'].map(m=><option key={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div className="admin-field"><label>Date Paid</label>
+                  <input type="date" value={payForm.PaidDate} onChange={e=>setPayForm(p=>({...p,PaidDate:e.target.value}))} />
+                </div>
+                <div className="admin-field admin-form-full"><label>Notes</label>
+                  <input value={payForm.Notes} onChange={e=>setPayForm(p=>({...p,Notes:e.target.value}))} placeholder="e.g. Check #1234" />
+                </div>
+              </div>
+            </div>
+            <div className="admin-modal-footer">
+              <button className="admin-btn admin-btn-outline" onClick={()=>setPaidModal(null)}>Cancel</button>
+              <button className="admin-btn admin-btn-primary" onClick={markPaid} disabled={saving}>{saving?'Saving…':'✅ Confirm Payment'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Estimates ─────────────────────────────────────────────────
 function AdminEstimates() {
   const { data, loading, reload } = useSheetData('getEstimates');
+  const [modal, setModal]   = useState(null);
+  const [selected, setSel]  = useState(null);
+  const [jobDate, setJobDate] = useState(today());
+  const [saving, setSaving] = useState(false);
+
+  const accept = async () => {
+    setSaving(true);
+    const r = await api('acceptEstimate', {}, { EstimateID: selected.EstimateID, JobDate: jobDate });
+    if (r.status==='ok') { toast('Accepted ✅'); reload(); setModal(null); }
+    else toast(r.message, 'error');
+    setSaving(false);
+  };
+
+  const reject = async (est) => {
+    if (!window.confirm('Reject this estimate?')) return;
+    const r = await api('rejectEstimate', {}, { EstimateID: est.EstimateID });
+    if (r.status==='ok') { toast('Rejected'); reload(); }
+    else toast(r.message, 'error');
+  };
 
   const convert = async (est) => {
-    if (!window.confirm(`Convert estimate ${est.EstimateID} to an invoice?`)) return;
+    if (!window.confirm(`Convert ${est.EstimateID} to invoice?`)) return;
     const r = await api('convertToInvoice', {}, { EstimateID: est.EstimateID });
     if (r.status==='ok') { toast(`Invoice ${r.data.InvoiceID} created ✅`); reload(); }
     else toast(r.message, 'error');
@@ -220,84 +341,196 @@ function AdminEstimates() {
 
   const cols = [
     { key:'EstimateID',   label:'Estimate #',  width:120 },
-    { key:'CustomerName', label:'Customer',     width:160 },
-    { key:'Division',     label:'Division',     width:80,  render: DivisionBadge },
-    { key:'Version',      label:'Version',      width:80,  render: v => <span className={`admin-badge ${v==='Revised'?'admin-badge-amber':'admin-badge-blue'}`}>{v}</span> },
-    { key:'EstimateDate', label:'Date',         width:100 },
-    { key:'Total',        label:'Total',        width:100, render: CurrencyCell },
-    { key:'Status',       label:'Status',       width:100, render: StatusBadge },
-    { key:'actions',      label:'',             width:120, render: (_, row) => (
-      ['Draft','Sent','Approved'].includes(row.Status)
-        ? <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();convert(row);}}>→ Invoice</button>
-        : null
+    { key:'CustomerName', label:'Customer',    width:150 },
+    { key:'Division',     label:'Division',    width:80,  render: DivisionBadge },
+    { key:'EstimateDate', label:'Date',        width:100 },
+    { key:'Total',        label:'Total',       width:100, render: CurrencyCell },
+    { key:'Status',       label:'Status',      width:120, render: StatusBadge },
+    { key:'_actions',     label:'Actions',     width:200, render: (_, row) => (
+      <div style={{display:'flex',gap:4}}>
+        {row.Status === 'Pending' && <>
+          <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();setSel(row);setModal('accept');}}>✅ Accept</button>
+          <button className="admin-btn admin-btn-danger admin-btn-sm" onClick={e=>{e.stopPropagation();reject(row);}}>✕</button>
+        </>}
+        {row.Status === 'Accepted' && <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();convert(row);}}>→ Invoice</button>}
+      </div>
     )},
   ];
 
   if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
-  return <SheetGrid data={data} columns={cols} emptyMessage="No estimates yet." />;
+  return (
+    <div>
+      <SheetGrid data={data} columns={cols} emptyMessage="No estimates yet." />
+      {modal === 'accept' && selected && (
+        <div className="admin-modal-overlay" onClick={e=>e.target===e.currentTarget&&setModal(null)}>
+          <div className="admin-modal">
+            <div className="admin-modal-header"><h3>Accept Estimate</h3><button className="admin-btn admin-btn-outline admin-btn-sm" onClick={()=>setModal(null)}>✕</button></div>
+            <div className="admin-modal-body">
+              <p style={{marginBottom:12}}>{selected.EstimateID} · ${parseFloat(selected.Total||0).toFixed(2)}</p>
+              <div className="admin-field"><label>Schedule Job Date *</label><input type="date" value={jobDate} onChange={e=>setJobDate(e.target.value)} /></div>
+            </div>
+            <div className="admin-modal-footer">
+              <button className="admin-btn admin-btn-outline" onClick={()=>setModal(null)}>Cancel</button>
+              <button className="admin-btn admin-btn-primary" onClick={accept} disabled={saving||!jobDate}>{saving?'…':'✅ Accept & Schedule'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Customers ─────────────────────────────────────────────────
 function AdminCustomers() {
-  const { data, loading } = useSheetData('getCustomers');
-  const cols = [
-    { key:'CustomerID', label:'ID',       width:130 },
-    { key:'Name',       label:'Name',     width:160 },
-    { key:'Division',   label:'Division', width:80,  render: DivisionBadge },
-    { key:'Phone',      label:'Phone',    width:130 },
-    { key:'Email',      label:'Email',    width:200 },
-    { key:'City',       label:'City',     width:120 },
-    { key:'State',      label:'State',    width:60 },
-    { key:'Active',     label:'Active',   width:70,  render: v => StatusBadge(String(v).toUpperCase()==='TRUE'?'Active':'Inactive') },
+  const crud = useCrud({ getAction:'getCustomers', addAction:'addCustomer', updateAction:'updateCustomer', deleteAction:'deleteCustomer', idField:'CustomerID' });
+  const fields = [
+    { key:'Name',     label:'Name',     required:true },
+    { key:'Division', label:'Division', type:'select', options:['Spray','Tree','Both'] },
+    { key:'Phone',    label:'Phone' },
+    { key:'Email',    label:'Email' },
+    { key:'Address',  label:'Address',  full:true },
+    { key:'City',     label:'City' },
+    { key:'State',    label:'State',    placeholder:'IN' },
+    { key:'Zip',      label:'Zip' },
+    { key:'Notes',    label:'Notes',    type:'textarea', full:true },
   ];
-  if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
-  return <SheetGrid data={data} columns={cols} emptyMessage="No customers yet." />;
+  const cols = [
+    { key:'Name',    label:'Name',     width:150 },
+    { key:'Division',label:'Division', width:80, render: DivisionBadge },
+    { key:'Phone',   label:'Phone',    width:130 },
+    { key:'Email',   label:'Email',    width:200 },
+    { key:'City',    label:'City',     width:110 },
+    { key:'Active',  label:'Active',   width:70, render: v => StatusBadge(String(v).toUpperCase()==='TRUE'?'Active':'Inactive') },
+  ];
+  if (crud.loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
+  return (
+    <div>
+      <div style={{marginBottom:12}}>
+        <button className="admin-btn admin-btn-primary" onClick={() => crud.openAdd({ Division:'Spray', State:'IN', Active:true })}>+ Add Customer</button>
+      </div>
+      <SheetGrid data={crud.data} columns={cols} onRowClick={crud.openEdit} emptyMessage="No customers yet." />
+      {crud.modal && <CrudModal title={crud.modal==='add'?'Add Customer':'Edit Customer'} fields={fields} values={crud.form} onChange={crud.setField} onSave={crud.save} onClose={()=>crud.setModal(null)} saving={crud.saving} />}
+    </div>
+  );
 }
 
 // ── Jobs ──────────────────────────────────────────────────────
 function AdminJobs() {
-  const { data, loading } = useSheetData('getJobs');
-  const cols = [
-    { key:'JobID',        label:'Job ID',      width:130 },
-    { key:'CustomerName', label:'Customer',    width:160 },
-    { key:'Division',     label:'Division',    width:80,  render: DivisionBadge },
-    { key:'Description',  label:'Description', width:220 },
-    { key:'JobDate',      label:'Date',        width:100 },
-    { key:'Status',       label:'Status',      width:110, render: StatusBadge },
-    { key:'AssignedTo',   label:'Assigned To', width:130 },
+  const crud = useCrud({ getAction:'getJobs', addAction:'addJob', updateAction:'updateJob', deleteAction:'deleteJob', idField:'JobID' });
+  const { data: customers } = useSheetData('getCustomers');
+  const fields = [
+    { key:'CustomerID',  label:'Customer',    type:'select', options: [{value:'',label:'— Select —'}, ...customers.map(c=>({value:c.CustomerID,label:c.Name}))] },
+    { key:'Division',    label:'Division',    type:'select', options:['Spray','Tree'] },
+    { key:'Status',      label:'Status',      type:'select', options:['Estimate','Scheduled','Finished','Canceled'] },
+    { key:'Priority',    label:'Priority',    type:'select', options:['Normal','Urgent'] },
+    { key:'JobDate',     label:'Job Date',    type:'date' },
+    { key:'Description', label:'Description', type:'textarea', full:true },
+    { key:'Notes',       label:'Notes',       type:'textarea', full:true },
   ];
-  if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
-  return <SheetGrid data={data} columns={cols} emptyMessage="No jobs yet." />;
+  const cols = [
+    { key:'CustomerName', label:'Customer',   width:150 },
+    { key:'Division',     label:'Division',   width:80, render: DivisionBadge },
+    { key:'Description',  label:'Description',width:200 },
+    { key:'JobDate',      label:'Date',       width:100 },
+    { key:'Priority',     label:'Priority',   width:80, render: v => v==='Urgent' ? <span style={{background:'#fee2e2',color:'#991b1b',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>🔴 Urgent</span> : <span style={{background:'#f3f4f6',color:'#6b7280',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>Normal</span> },
+    { key:'Status',       label:'Status',     width:110, render: StatusBadge },
+  ];
+  if (crud.loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
+  return (
+    <div>
+      <div style={{marginBottom:12}}>
+        <button className="admin-btn admin-btn-primary" onClick={()=>crud.openAdd({Division:'Spray',Status:'Estimate',Priority:'Normal'})}>+ Add Job</button>
+      </div>
+      <SheetGrid data={crud.data} columns={cols} onRowClick={crud.openEdit} emptyMessage="No jobs yet." />
+      {crud.modal && <CrudModal title={crud.modal==='add'?'Add Job':'Edit Job'} fields={fields} values={crud.form} onChange={crud.setField} onSave={crud.save} onClose={()=>crud.setModal(null)} saving={crud.saving} />}
+    </div>
+  );
+}
+
+// ── Equipment ─────────────────────────────────────────────────
+function AdminEquipment() {
+  const crud = useCrud({ getAction:'getEquipment', addAction:'addEquipment', updateAction:'updateEquipment', deleteAction:'deleteEquipment', idField:'EquipmentID' });
+  const fields = [
+    { key:'Name',         label:'Name *',       required:true },
+    { key:'Type',         label:'Type',          type:'select', options:['Truck','Trailer','Tool','Other'] },
+    { key:'Year',         label:'Year' },
+    { key:'Make',         label:'Make' },
+    { key:'Model',        label:'Model' },
+    { key:'LicensePlate', label:'License Plate' },
+    { key:'Notes',        label:'Notes',         type:'textarea', full:true },
+  ];
+  const cols = [
+    { key:'Name',         label:'Name',          width:150 },
+    { key:'Type',         label:'Type',          width:90 },
+    { key:'Year',         label:'Year',          width:70 },
+    { key:'Make',         label:'Make',          width:100 },
+    { key:'Model',        label:'Model',         width:120 },
+    { key:'LicensePlate', label:'Plate',         width:100 },
+    { key:'Active',       label:'Active',        width:70, render: v => StatusBadge(String(v).toUpperCase()==='TRUE'?'Active':'Inactive') },
+  ];
+  if (crud.loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
+  return (
+    <div>
+      <div style={{marginBottom:12}}>
+        <button className="admin-btn admin-btn-primary" onClick={()=>crud.openAdd({Type:'Truck',Active:true})}>+ Add Equipment</button>
+      </div>
+      <SheetGrid data={crud.data} columns={cols} onRowClick={crud.openEdit} emptyMessage="No equipment added yet." />
+      {crud.modal && <CrudModal title={crud.modal==='add'?'Add Equipment':'Edit Equipment'} fields={fields} values={crud.form} onChange={crud.setField} onSave={crud.save} onClose={()=>crud.setModal(null)} saving={crud.saving} />}
+    </div>
+  );
+}
+
+// ── Vendors ───────────────────────────────────────────────────
+function AdminVendors() {
+  const crud = useCrud({ getAction:'getVendors', addAction:'addVendor', updateAction:'updateVendor', deleteAction:'deleteVendor', idField:'VendorID' });
+  const fields = [
+    { key:'Name',     label:'Name *',    required:true },
+    { key:'Category', label:'Category',  type:'select', options:['Fuel','Chemical Supplier','Parts','Equipment','Other'] },
+    { key:'Phone',    label:'Phone' },
+    { key:'Address',  label:'Address',   full:true },
+    { key:'Notes',    label:'Notes',     type:'textarea', full:true },
+  ];
+  const cols = [
+    { key:'Name',     label:'Name',     width:160 },
+    { key:'Category', label:'Category', width:140 },
+    { key:'Phone',    label:'Phone',    width:130 },
+    { key:'Address',  label:'Address',  width:200 },
+    { key:'Active',   label:'Active',   width:70, render: v => StatusBadge(String(v).toUpperCase()==='TRUE'?'Active':'Inactive') },
+  ];
+  if (crud.loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
+  return (
+    <div>
+      <div style={{marginBottom:12}}>
+        <button className="admin-btn admin-btn-primary" onClick={()=>crud.openAdd({Category:'Fuel',Active:true})}>+ Add Vendor</button>
+      </div>
+      <SheetGrid data={crud.data} columns={cols} onRowClick={crud.openEdit} emptyMessage="No vendors added yet." />
+      {crud.modal && <CrudModal title={crud.modal==='add'?'Add Vendor':'Edit Vendor'} fields={fields} values={crud.form} onChange={crud.setField} onSave={crud.save} onClose={()=>crud.setModal(null)} saving={crud.saving} />}
+    </div>
+  );
 }
 
 // ── Expenses ──────────────────────────────────────────────────
 function AdminExpenses() {
   const { data, loading } = useSheetData('getExpenses');
   const total = data.reduce((s,e) => s+(parseFloat(e.Amount)||0), 0);
-
   const cols = [
-    { key:'Date',        label:'Date',        width:100 },
-    { key:'Category',    label:'Category',    width:160 },
-    { key:'Division',    label:'Division',    width:80,  render: DivisionBadge },
-    { key:'Description', label:'Description', width:200 },
-    { key:'Amount',      label:'Amount',      width:100, render: CurrencyCell },
-    { key:'Vendor',      label:'Vendor',      width:140 },
+    { key:'Date',        label:'Date',       width:100 },
+    { key:'Category',    label:'Category',   width:130 },
+    { key:'Division',    label:'Division',   width:80, render: DivisionBadge },
+    { key:'Description', label:'Description',width:180 },
+    { key:'Amount',      label:'Amount',     width:100, render: CurrencyCell },
+    { key:'Vendor',      label:'Vendor',     width:130 },
+    { key:'ReceiptUrl',  label:'Receipt',    width:80,  render: v => v ? <a href={v} target="_blank" rel="noopener noreferrer" style={{color:'#1d6fa4'}}>View</a> : '' },
   ];
-
   const exportCSV = async () => {
-    const r = await api('exportCSV', { sheet: 'Expenses' });
-    if (r.status==='ok') {
-      const a = document.createElement('a');
-      a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(r.data.csv);
-      a.download = 'JB_Expenses.csv'; a.click();
-    }
+    const r = await api('exportCSV', { sheet:'Expenses' });
+    if (r.status==='ok') { const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(r.data.csv); a.download='JB_Expenses.csv'; a.click(); }
   };
-
   if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
   return (
     <div>
       <div style={{display:'flex',gap:12,marginBottom:16,alignItems:'center'}}>
-        <div style={{fontWeight:700,fontSize:15}}>Total: <span style={{color:'#dc2626'}}>${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+        <div style={{fontWeight:700}}>Total: <span style={{color:'#dc2626'}}>${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
         <button className="admin-btn admin-btn-outline" onClick={exportCSV} style={{marginLeft:'auto'}}>⬇ Export CSV</button>
       </div>
       <SheetGrid data={data} columns={cols} emptyMessage="No expenses logged." />
@@ -309,30 +542,27 @@ function AdminExpenses() {
 function AdminMileage() {
   const { data, loading } = useSheetData('getMileage');
   const totalMiles = data.reduce((s,m) => s+(parseFloat(m.TotalMiles)||0), 0);
-  const deduction  = (totalMiles * 0.67).toFixed(2);
-
   const cols = [
-    { key:'Date',       label:'Date',      width:100 },
-    { key:'DriverName', label:'Driver',    width:130 },
-    { key:'TruckName',  label:'Truck',     width:150 },
-    { key:'Division',   label:'Division',  width:80,  render: DivisionBadge },
-    { key:'StartMiles', label:'Start',     width:80 },
-    { key:'EndMiles',   label:'End',       width:80 },
-    { key:'TotalMiles', label:'Miles',     width:80,  render: v => <strong>{v}</strong> },
-    { key:'Purpose',    label:'Purpose',   width:180 },
+    { key:'Date',       label:'Date',     width:100 },
+    { key:'DriverName', label:'Driver',   width:120 },
+    { key:'TruckName',  label:'Truck',    width:140 },
+    { key:'Division',   label:'Division', width:80, render: DivisionBadge },
+    { key:'PointA',     label:'From',     width:160 },
+    { key:'PointB',     label:'To',       width:160 },
+    { key:'Rounds',     label:'Rounds',   width:70 },
+    { key:'TotalMiles', label:'Miles',    width:80, render: v => <strong>{v}</strong> },
+    { key:'Purpose',    label:'Notes',    width:160 },
   ];
-
   const exportCSV = async () => {
-    const r = await api('exportCSV', { sheet: 'Mileage' });
+    const r = await api('exportCSV', { sheet:'Mileage' });
     if (r.status==='ok') { const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(r.data.csv); a.download='JB_Mileage.csv'; a.click(); }
   };
-
   if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
   return (
     <div>
       <div style={{display:'flex',gap:16,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
-        <div style={{fontWeight:700}}>Total miles: <span style={{color:'#1a4a1a'}}>{totalMiles.toLocaleString()}</span></div>
-        <div style={{fontWeight:700}}>IRS deduction (@$0.67/mi): <span style={{color:'#1d6fa4'}}>${parseFloat(deduction).toLocaleString()}</span></div>
+        <div style={{fontWeight:700}}>Total: <span style={{color:'#1a4a1a'}}>{totalMiles.toLocaleString()} miles</span></div>
+        <div style={{fontWeight:700}}>IRS deduction: <span style={{color:'#1d6fa4'}}>${(totalMiles*0.67).toFixed(2)}</span></div>
         <button className="admin-btn admin-btn-outline" onClick={exportCSV} style={{marginLeft:'auto'}}>⬇ Export CSV</button>
       </div>
       <SheetGrid data={data} columns={cols} emptyMessage="No mileage logged." />
@@ -346,29 +576,21 @@ function AdminHours() {
   const [end, setEnd]     = useState(today());
   const [data, setData]   = useState([]);
   const [loading, setLoading] = useState(false);
-
-  const load = () => {
-    setLoading(true);
-    api('getHours', { startDate:start, endDate:end }).then(r => { if(r.status==='ok') setData(r.data); setLoading(false); });
-  };
-  useEffect(() => { load(); }, []);
-
+  const load = () => { setLoading(true); api('getHours', {startDate:start,endDate:end}).then(r=>{if(r.status==='ok')setData(r.data);setLoading(false);}); };
+  useEffect(()=>{load();},[]);
   const totalHours = data.reduce((s,h) => s+(parseFloat(h.TotalHours)||0), 0);
-
   const cols = [
     { key:'EmployeeName', label:'Employee',  width:130 },
     { key:'Date',         label:'Date',      width:100 },
     { key:'ClockIn',      label:'Clock In',  width:150, render: v => v ? new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '—' },
     { key:'ClockOut',     label:'Clock Out', width:150, render: v => v ? new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : <span className="admin-badge admin-badge-green">Active</span> },
-    { key:'TotalHours',   label:'Hours',     width:80,  render: v => <strong>{v || '—'}</strong> },
+    { key:'TotalHours',   label:'Hours',     width:80,  render: v => <strong>{v||'—'}</strong> },
     { key:'Notes',        label:'Notes',     width:200 },
   ];
-
   const exportCSV = async () => {
-    const r = await api('exportCSV', { sheet: 'Hours' });
+    const r = await api('exportCSV', { sheet:'Hours' });
     if (r.status==='ok') { const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(r.data.csv); a.download='JB_Hours.csv'; a.click(); }
   };
-
   return (
     <div>
       <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'flex-end',flexWrap:'wrap'}}>
@@ -383,104 +605,85 @@ function AdminHours() {
   );
 }
 
-// ── Chemicals ─────────────────────────────────────────────────
-function AdminChemicals() {
-  const { data, loading } = useSheetData('getChemicals');
-  const total = data.reduce((s,c) => s+(parseFloat(c.TotalCost)||0), 0);
-  const cols = [
-    { key:'PurchaseDate', label:'Date',          width:100 },
-    { key:'Name',         label:'Chemical',      width:160 },
-    { key:'Manufacturer', label:'Manufacturer',  width:140 },
-    { key:'Quantity',     label:'Qty',           width:70 },
-    { key:'Unit',         label:'Unit',          width:80 },
-    { key:'CostPerUnit',  label:'$/Unit',        width:80,  render: CurrencyCell },
-    { key:'TotalCost',    label:'Total',         width:90,  render: CurrencyCell },
-    { key:'Vendor',       label:'Vendor',        width:130 },
-  ];
-  if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
-  return (
-    <div>
-      <div style={{fontWeight:700,marginBottom:12}}>Total spent: <span style={{color:'#dc2626'}}>${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
-      <SheetGrid data={data} columns={cols} emptyMessage="No chemical purchases logged." />
-    </div>
-  );
-}
-
 // ── Licenses ──────────────────────────────────────────────────
 function AdminLicenses() {
-  const { data, loading } = useSheetData('getLicenses');
+  const crud = useCrud({ getAction:'getLicenses', addAction:'addLicense', updateAction:'updateLicense', deleteAction:'deleteLicense', idField:'LicenseID' });
+  const fields = [
+    { key:'HolderName',     label:'Holder Name *',  required:true },
+    { key:'LicenseType',    label:'License Type',   type:'select', options:['CDL-A','CDL-B','Pesticide Applicator','Business License','Other'] },
+    { key:'LicenseNumber',  label:'License #' },
+    { key:'IssueDate',      label:'Issue Date',     type:'date' },
+    { key:'ExpirationDate', label:'Expiration *',   type:'date', required:true },
+    { key:'State',          label:'State',          placeholder:'IN' },
+    { key:'Notes',          label:'Notes',          type:'textarea', full:true },
+  ];
   const cols = [
-    { key:'HolderName',     label:'Holder',       width:140 },
-    { key:'LicenseType',    label:'Type',         width:160 },
-    { key:'LicenseNumber',  label:'Number',       width:130 },
-    { key:'IssuedDate',     label:'Issued',       width:100 },
-    { key:'ExpirationDate', label:'Expires',      width:100 },
-    { key:'State',          label:'State',        width:60 },
-    { key:'DaysUntilExpiry', label:'Days Left',   width:90,  render: v => {
+    { key:'HolderName',     label:'Holder',      width:140 },
+    { key:'LicenseType',    label:'Type',        width:160 },
+    { key:'LicenseNumber',  label:'Number',      width:130 },
+    { key:'ExpirationDate', label:'Expires',     width:100 },
+    { key:'DaysUntilExpiry',label:'Days Left',   width:90, render: v => {
       const n = parseInt(v);
       return <span className={`admin-badge ${n<0?'admin-badge-red':n<=30?'admin-badge-amber':'admin-badge-green'}`}>{n<0?'Expired':`${n}d`}</span>;
     }},
   ];
-  if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
-  return <SheetGrid data={data} columns={cols} emptyMessage="No licenses added." />;
+  if (crud.loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
+  return (
+    <div>
+      <div style={{marginBottom:12}}>
+        <button className="admin-btn admin-btn-primary" onClick={()=>crud.openAdd({State:'IN'})}>+ Add License</button>
+      </div>
+      <SheetGrid data={crud.data} columns={cols} onRowClick={crud.openEdit} emptyMessage="No licenses added." />
+      {crud.modal && <CrudModal title={crud.modal==='add'?'Add License':'Edit License'} fields={fields} values={crud.form} onChange={crud.setField} onSave={crud.save} onClose={()=>crud.setModal(null)} saving={crud.saving} />}
+    </div>
+  );
 }
 
 // ── Tax Summary ───────────────────────────────────────────────
 function AdminTax() {
-  const [summary, setSummary]     = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [refreshing, setRefresh]  = useState(false);
+  const [summary, setSummary]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [refreshing, setRefresh] = useState(false);
   const year = new Date().getFullYear().toString();
-
-  const load = () => { setLoading(true); api('getTaxSummary').then(r => { if(r.status==='ok') setSummary(r.data); setLoading(false); }); };
-  useEffect(() => { load(); }, []);
-
-  const refresh = async () => { setRefresh(true); const r = await api('refreshTaxSummary', { year }, {}); if(r.status==='ok'){toast('Refreshed ✅');load();}else toast(r.message,'error'); setRefresh(false); };
-
+  const load = () => { setLoading(true); api('getTaxSummary').then(r=>{if(r.status==='ok')setSummary(r.data);setLoading(false);}); };
+  useEffect(()=>{load();},[]);
+  const refresh = async () => { setRefresh(true); const r=await api('refreshTaxSummary',{year},{}); if(r.status==='ok'){toast('Refreshed ✅');load();}else toast(r.message,'error'); setRefresh(false); };
   const exportCSV = async () => {
-    const r = await api('exportCSV', { sheet: 'Tax_Summary' });
-    if (r.status==='ok') { const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(r.data.csv); a.download='JB_TaxSummary.csv'; a.click(); }
+    const r = await api('exportCSV',{sheet:'Tax_Summary'});
+    if(r.status==='ok'){const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(r.data.csv);a.download='JB_TaxSummary.csv';a.click();}
   };
-
-  const periods = [...new Set(summary.map(r => r.Period))];
-
+  const periods = [...new Set(summary.map(r=>r.Period))];
   return (
     <div>
       <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
-        <div><div style={{fontWeight:700}}>Indiana Tax Summary — {year}</div><div style={{fontSize:12,color:'#6b7280'}}>Quarterly breakdown by division. Refresh to recalculate.</div></div>
+        <div><div style={{fontWeight:700}}>Tax Summary — {year}</div><div style={{fontSize:12,color:'#6b7280'}}>Quarterly by division</div></div>
         <button className="admin-btn admin-btn-outline" onClick={exportCSV} style={{marginLeft:'auto'}}>⬇ Export CSV</button>
         <button className="admin-btn admin-btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'…':'↻ Refresh'}</button>
       </div>
-
       {loading ? <p style={{color:'#6b7280'}}>Loading…</p>
       : periods.length === 0 ? (
         <div style={{background:'white',borderRadius:10,padding:32,textAlign:'center',color:'#6b7280'}}>
           <div style={{fontSize:32,marginBottom:8}}>📊</div>
-          <p>No data yet. Click Refresh to generate.</p>
+          <p>No data yet.</p>
           <button className="admin-btn admin-btn-primary" onClick={refresh} style={{marginTop:12}} disabled={refreshing}>{refreshing?'…':'↻ Refresh Now'}</button>
         </div>
       ) : periods.map(period => {
-        const rows = summary.filter(r => r.Period === period);
-        const allRow = rows.find(r => r.Division === 'All');
+        const rows   = summary.filter(r=>r.Period===period);
+        const allRow = rows.find(r=>r.Division==='All');
         return (
           <div key={period} style={{background:'white',borderRadius:10,marginBottom:16,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,0.08)'}}>
             <div style={{background:'#1a4a1a',color:'white',padding:'10px 16px',fontWeight:700}}>📅 {period}</div>
             <div style={{overflowX:'auto'}}>
               <table className="tax-table">
-                <thead><tr>
-                  <th style={{textAlign:'left'}}>Division</th>
-                  <th>Revenue</th><th>Expenses</th><th>Fuel</th>
-                  <th>Chemicals</th><th>Labor Hrs</th><th>Mileage Ded.</th><th>Net Income</th>
-                </tr></thead>
+                <thead><tr><th style={{textAlign:'left'}}>Division</th><th>Revenue</th><th>Expenses</th><th>Fuel</th><th>Chemicals</th><th>Miles Ded.</th><th>Net Income</th></tr></thead>
                 <tbody>
-                  {rows.filter(r=>r.Division!=='All').map(r => (
+                  {rows.filter(r=>r.Division!=='All').map(r=>(
                     <tr key={r.Division}>
                       <td>{r.Division==='Spray'?<span style={{background:'#dcfce7',color:'#166534',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>Spray</span>:<span style={{background:'#fef9c3',color:'#854d0e',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>Tree</span>}</td>
                       <td style={{color:'#1a4a1a',fontWeight:600}}>${parseFloat(r.TotalRevenue||0).toFixed(2)}</td>
                       <td style={{color:'#dc2626'}}>${parseFloat(r.TotalExpenses||0).toFixed(2)}</td>
                       <td>${parseFloat(r.FuelCosts||0).toFixed(2)}</td>
                       <td>${parseFloat(r.ChemicalCosts||0).toFixed(2)}</td>
-                      <td>{parseFloat(r.LaborCosts||0).toFixed(1)}</td>
                       <td style={{color:'#1d6fa4'}}>${parseFloat(r.MileageDeduction||0).toFixed(2)}</td>
                       <td style={{color:parseFloat(r.NetIncome||0)>=0?'#1a4a1a':'#dc2626',fontWeight:700}}>${parseFloat(r.NetIncome||0).toFixed(2)}</td>
                     </tr>
@@ -490,16 +693,13 @@ function AdminTax() {
                       <td>📊 Total</td>
                       <td>${parseFloat(allRow.TotalRevenue||0).toFixed(2)}</td>
                       <td>${parseFloat(allRow.TotalExpenses||0).toFixed(2)}</td>
-                      <td>—</td><td>—</td><td>—</td>
+                      <td>—</td><td>—</td>
                       <td>${parseFloat(allRow.MileageDeduction||0).toFixed(2)}</td>
                       <td style={{color:parseFloat(allRow.NetIncome||0)>=0?'#1a4a1a':'#dc2626'}}>${parseFloat(allRow.NetIncome||0).toFixed(2)}</td>
                     </tr>
                   )}
                 </tbody>
               </table>
-            </div>
-            <div style={{padding:'10px 16px',background:'#fef3c7',fontSize:12,color:'#92400e'}}>
-              💡 Mileage deduction uses IRS standard rate ($0.67/mile). Export to CSV for your accountant.
             </div>
           </div>
         );
@@ -514,30 +714,30 @@ function AdminUsers() {
   const [modal, setModal]   = useState(null);
   const [form, setForm]     = useState({});
   const [saving, setSaving] = useState(false);
-
-  const f = e => setForm(p => ({...p, [e.target.name]: e.target.value}));
+  const f = (k, v) => setForm(p => ({...p, [k]: v}));
 
   const save = async () => {
+    if (!form.Name) return toast('Name is required', 'error');
     setSaving(true);
     const r = await api(modal==='add'?'addUser':'updateUser', {}, form);
     if (r.status==='ok') { toast('User saved!'); reload(); setModal(null); }
-    else toast(r.message,'error');
+    else toast(r.message, 'error');
     setSaving(false);
   };
 
   const cols = [
-    { key:'UserID', label:'User ID',  width:150 },
-    { key:'Name',   label:'Name',     width:130 },
-    { key:'Email',  label:'Email',    width:200 },
-    { key:'Role',   label:'Role',     width:90,  render: v => <span className={`admin-badge ${v==='owner'?'admin-badge-green':v==='admin'?'admin-badge-blue':'admin-badge-gray'}`}>{v}</span> },
-    { key:'Active', label:'Active',   width:70,  render: v => StatusBadge(String(v).toUpperCase()==='TRUE'?'Active':'Inactive') },
+    { key:'Name',  label:'Name',  width:140 },
+    { key:'Email', label:'Email', width:200 },
+    { key:'Role',  label:'Role',  width:100, render: v => <span className={`admin-badge ${v==='owner'?'admin-badge-green':v==='admin'?'admin-badge-blue':'admin-badge-gray'}`}>{v}</span> },
+    { key:'Active',label:'Active',width:70,  render: v => StatusBadge(String(v).toUpperCase()==='TRUE'?'Active':'Inactive') },
   ];
 
   if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
   return (
     <div>
-      <div style={{marginBottom:12}}>
+      <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
         <button className="admin-btn admin-btn-primary" onClick={()=>{setForm({Name:'',Email:'',PIN:'',Role:'employee'});setModal('add');}}>+ Add User</button>
+        <span style={{fontSize:12,color:'#6b7280'}}>PINs are hashed for security. Enter a new PIN to change it.</span>
       </div>
       <SheetGrid data={data} columns={cols} onRowClick={row=>{setForm({...row,PIN:''});setModal('edit');}} />
 
@@ -547,22 +747,22 @@ function AdminUsers() {
             <div className="admin-modal-header"><h3>{modal==='add'?'Add User':'Edit User'}</h3><button className="admin-btn admin-btn-outline admin-btn-sm" onClick={()=>setModal(null)}>✕</button></div>
             <div className="admin-modal-body">
               <div className="admin-form-grid">
-                <div className="admin-field"><label>Name *</label><input name="Name" value={form.Name||''} onChange={f} /></div>
+                <div className="admin-field"><label>Name *</label><input value={form.Name||''} onChange={e=>f('Name',e.target.value)} /></div>
                 <div className="admin-field"><label>Role</label>
-                  <select name="Role" value={form.Role||'employee'} onChange={f}>
+                  <select value={form.Role||'employee'} onChange={e=>f('Role',e.target.value)}>
                     <option value="owner">Owner</option>
                     <option value="admin">Admin</option>
                     <option value="employee">Employee</option>
                   </select>
                 </div>
-                <div className="admin-field admin-form-full"><label>Email</label><input name="Email" value={form.Email||''} onChange={f} /></div>
+                <div className="admin-field admin-form-full"><label>Email</label><input value={form.Email||''} onChange={e=>f('Email',e.target.value)} /></div>
                 <div className="admin-field admin-form-full">
-                  <label>PIN {modal==='edit'?'(leave blank to keep current)':'*'}</label>
-                  <input type="password" name="PIN" value={form.PIN||''} onChange={f} placeholder="4-8 digit PIN" />
+                  <label>PIN {modal==='edit'?'(enter new PIN to change)':'*'}</label>
+                  <input type="password" value={form.PIN||''} onChange={e=>f('PIN',e.target.value)} placeholder={modal==='edit'?'Leave blank to keep current':'4-8 digit PIN'} />
                 </div>
               </div>
               <div style={{marginTop:12,padding:'10px 12px',background:'#dbeafe',borderRadius:8,fontSize:12,color:'#1e40af'}}>
-                💡 Employees log in on the mobile app with their PIN. Owner and Admin can also access this admin panel.
+                💡 PINs are hashed (encrypted) before saving. Each user must have a unique PIN. If two users try to use the same PIN, the app will warn them to pick a different one.
               </div>
             </div>
             <div className="admin-modal-footer">
