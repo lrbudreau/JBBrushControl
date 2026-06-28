@@ -164,3 +164,55 @@ body {
 .row-spread { display: flex; align-items: center; justify-content: space-between; }
 
 @keyframes toastIn { from { opacity:0; transform: translateY(-8px); } to { opacity:1; transform: translateY(0); } }
+
+/* ── Responsive desktop styles ── */
+@media (min-width: 768px) {
+  /* Remove mobile max-width constraint on desktop */
+  .mobile-page {
+    max-width: 100%;
+    padding-bottom: 20px;
+  }
+
+  /* Bottom nav hidden on desktop */
+  .bottom-nav { display: none; }
+
+  /* Cards in a grid on desktop */
+  .stats-row {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  /* Wider list items */
+  .list-item {
+    padding: 16px 20px;
+  }
+
+  /* Bigger touch targets on desktop aren't needed */
+  .form-group input,
+  .form-group select,
+  .form-group textarea {
+    min-height: 42px;
+    font-size: 14px;
+  }
+
+  /* Modal sheets become centered modals on desktop */
+  .modal-overlay {
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-sheet {
+    border-radius: 12px;
+    max-width: 560px;
+    max-height: 80vh;
+  }
+  .modal-handle { display: none; }
+
+  /* Wider page padding */
+  .page-pad { padding: 20px 24px; }
+
+  /* Card grids on desktop */
+  .gap-stack { flex-direction: row; flex-wrap: wrap; }
+}
+
+@media (min-width: 1024px) {
+  .stats-row { grid-template-columns: repeat(4, 1fr); }
+}
