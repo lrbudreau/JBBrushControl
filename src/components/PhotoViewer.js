@@ -91,10 +91,6 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
             <div style={{ marginTop: 12, fontSize: 12, color: '#6b7280' }}>
               Uploaded {selected.UploadDate}
             </div>
-            <a href={selected.DriveUrl} target="_blank" rel="noopener noreferrer"
-              style={{ display: 'block', marginTop: 12, textAlign: 'center', color: '#1d6fa4', fontWeight: 600, fontSize: 14 }}>
-              Open in Google Drive ↗
-            </a>
           </div>
         </div>
       )}
