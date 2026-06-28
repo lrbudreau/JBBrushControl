@@ -340,8 +340,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
           <div>
             <div style={S.stepTitle}>📸 Photos</div>
             <div style={S.stepSub}>Take photos of the job site. They'll be saved to Google Drive linked to this job.</div>
-            <input ref={fileRef} type="file" accept="image/*" multiple capture="environment"
-              style={{ display:'none' }} onChange={handlePhotoSelect} />
+            <input ref={fileRef} type="file" accept="image/*" multiple style={{ display:'none' }} onChange={handlePhotoSelect} />
             <button style={S.photoBtn} onClick={() => fileRef.current.click()}>📷 Take / Add Photos</button>
             {photos.length > 0 ? (
               <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:12 }}>
