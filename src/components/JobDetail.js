@@ -13,7 +13,8 @@ export default function JobDetail({ jobID, onBack }) {
   const [showPhotos, setShowPhotos] = useState(false);
   const [modal, setModal]       = useState(null);
   const [saving, setSaving]     = useState(false);
-  const [jobDate, setJobDate]   = useState('');
+  const [jobDate, setJobDate]     = useState('');
+  const [jobEndDate, setJobEndDate] = useState('');
   const [dueDate, setDueDate]   = useState('');
   const [paidModal, setPaidModal] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -43,7 +44,7 @@ export default function JobDetail({ jobID, onBack }) {
   // Accept estimate → prompt for job date → schedule job
   const acceptEstimate = async (est) => {
     setSaving(true);
-    const r = await api('acceptEstimate', {}, { EstimateID: est.EstimateID, JobDate: jobDate });
+    const r = await api('acceptEstimate', {}, { EstimateID: est.EstimateID, JobDate: jobDate, JobEndDate: jobEndDate });
     if (r.status === 'ok') { toast('Estimate accepted — job scheduled! ✅'); load(); setModal(null); }
     else toast(r.message, 'error');
     setSaving(false);
@@ -281,11 +282,25 @@ export default function JobDetail({ jobID, onBack }) {
                 <div style={{ fontSize:13 }}>Total: <strong>${parseFloat(modal.est.Total||0).toFixed(2)}</strong></div>
               </div>
 
-              <div style={S.label}>Pick a job date *</div>
-              <input type="date" style={S.input} value={jobDate} onChange={e => setJobDate(e.target.value)} />
+              <div style={{ display:'flex', gap:10 }}>
+                <div style={{ flex:1 }}>
+                  <div style={S.label}>Start date *</div>
+                  <input type="date" style={S.input} value={jobDate} onChange={e => setJobDate(e.target.value)} />
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={S.label}>End date <span style={{ fontWeight:400, color:'#9ca3af' }}>(if multi-day)</span></div>
+                  <input type="date" style={S.input} value={jobEndDate} onChange={e => setJobEndDate(e.target.value)}
+                    min={jobDate} placeholder="Same day" />
+                </div>
+              </div>
+              {jobDate && jobEndDate && jobEndDate > jobDate && (
+                <div style={{ fontSize:12, color:'#1d6fa4', fontWeight:600, marginTop:4 }}>
+                  📅 {getDayCount(jobDate, jobEndDate)} day job
+                </div>
+              )}
 
               {/* Schedule availability */}
-              <SchedulePreview selectedDate={jobDate} currentJobID={jobID} onSelectDate={setJobDate} />
+              <SchedulePreview selectedDate={jobDate} endDate={jobEndDate} currentJobID={jobID} onSelectDate={setJobDate} />
 
               <div style={{ fontSize:12, color:'#6b7280', marginTop:10 }}>
                 Accepting will schedule this job and mark the estimate as Accepted.
@@ -377,7 +392,13 @@ export default function JobDetail({ jobID, onBack }) {
   );
 }
 
-function SchedulePreview({ selectedDate, currentJobID, onSelectDate }) {
+function getDayCount(start, end) {
+  const s = new Date(start + 'T00:00:00');
+  const e = new Date(end   + 'T00:00:00');
+  return Math.round((e - s) / 86400000) + 1;
+}
+
+function SchedulePreview({ selectedDate, endDate, currentJobID, onSelectDate }) {
   const [jobs, setJobs]       = useState([]);
   const [viewMonth, setViewMonth] = useState(() => {
     const d = selectedDate ? new Date(selectedDate + 'T00:00:00') : new Date();
@@ -452,7 +473,9 @@ function SchedulePreview({ selectedDate, currentJobID, onSelectDate }) {
           const day     = i + 1;
           const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
           const dayJobs = jobsByDate[dateStr] || [];
-          const isSelected = dateStr === selectedDate;
+          const isSelected  = dateStr === selectedDate;
+          const isInRange   = endDate && endDate > selectedDate && dateStr > selectedDate && dateStr <= endDate;
+          const isRangeEnd  = dateStr === endDate;
           const isToday    = dateStr === today;
           const isPast     = dateStr < today;
           const hasUrgent  = dayJobs.some(j => j.Priority === 'Urgent');
@@ -461,12 +484,12 @@ function SchedulePreview({ selectedDate, currentJobID, onSelectDate }) {
             <div key={day} onClick={() => !isPast && onSelectDate && onSelectDate(dateStr)}
               style={{
                 borderRadius:6, padding:'4px 2px', minHeight:34, cursor: isPast ? 'default' : 'pointer',
-                background: isSelected ? '#1a4a1a' : dayJobs.length > 0 ? '#fff3cd' : 'white',
-                border: isToday ? '2px solid #1a4a1a' : '1px solid #e5e7eb',
+                background: isSelected ? '#1a4a1a' : isRangeEnd ? '#2d6a2d' : isInRange ? '#e8f5e8' : dayJobs.length > 0 ? '#fff3cd' : 'white',
+                border: isToday ? '2px solid #1a4a1a' : isSelected || isRangeEnd ? '2px solid #1a4a1a' : isInRange ? '1px solid #4a9e4a' : '1px solid #e5e7eb',
                 opacity: isPast ? 0.4 : 1,
                 display:'flex', flexDirection:'column', alignItems:'center',
               }}>
-              <span style={{ fontSize:12, fontWeight: isSelected||isToday ? 700 : 400, color: isSelected ? 'white' : '#111827' }}>{day}</span>
+              <span style={{ fontSize:12, fontWeight: isSelected||isRangeEnd||isToday ? 700 : 400, color: isSelected||isRangeEnd ? 'white' : '#111827' }}>{day}</span>
               {dayJobs.length > 0 && !isSelected && (
                 <span style={{ fontSize:9, background: hasUrgent?'#dc2626':'#d97706', color:'white', borderRadius:99, padding:'1px 4px', marginTop:1, lineHeight:1.4 }}>
                   {dayJobs.length}{hasUrgent?' 🔴':''}
@@ -483,9 +506,11 @@ function SchedulePreview({ selectedDate, currentJobID, onSelectDate }) {
       </div>
 
       {/* Legend */}
-      <div style={{ display:'flex', gap:12, marginTop:8, fontSize:11, color:'#6b7280' }}>
-        <span>🟡 Jobs scheduled</span>
-        <span style={{ color:'#1a4a1a', fontWeight:700 }}>■ Selected date</span>
+      <div style={{ display:'flex', gap:12, marginTop:8, fontSize:11, color:'#6b7280', flexWrap:'wrap' }}>
+        <span>🟡 Booked</span>
+        <span style={{ color:'#1a4a1a', fontWeight:700 }}>■ Start</span>
+        <span style={{ color:'#2d6a2d', fontWeight:700 }}>■ End</span>
+        <span style={{ color:'#4a9e4a', fontWeight:700 }}>■ Range</span>
         <span>🔴 Urgent</span>
       </div>
 
