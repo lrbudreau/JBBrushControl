@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import PhotoViewer from '../components/PhotoViewer';
+import JobDetail from '../components/JobDetail';
 import { api } from '../api';
 import { toast } from '../components/Toast';
 
@@ -127,7 +128,8 @@ export function MobileJobs() {
   const [jobs, setJobs]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter]   = useState('All');
-  const [viewPhotos, setViewPhotos] = useState(null); // { jobID, folderUrl }
+  const [viewPhotos, setViewPhotos] = useState(null);
+  const [selectedJobID, setSelectedJobID] = useState(null);
 
   useEffect(() => {
     api('getJobs').then(r => {
@@ -157,33 +159,23 @@ export function MobileJobs() {
         {loading ? <div className="card-body"><p className="text-muted">Loading…</p></div>
         : visible.length === 0 ? <div className="empty"><div className="empty-icon">🔧</div><p>No jobs found.</p></div>
         : visible.map(j => (
-          <div key={j.JobID}>
-            <div className="list-item">
-              <div className="list-item-main">
-                <div className="list-item-title">{j.CustomerName || '—'}</div>
-                <div className="list-item-sub">{j.JobDate} · {j.Description?.slice(0,40)}</div>
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
-                {j.Division==='Spray' ? <span className="div-spray">Spray</span> : <span className="div-tree">Tree</span>}
-                <span style={{ fontSize:11, fontWeight:700, color: STATUS_COLOR[j.Status]||'#6b7280' }}>{j.Status}</span>
-              </div>
+          <div key={j.JobID} className="list-item" onClick={() => setSelectedJobID(j.JobID)} style={{ cursor:'pointer' }}>
+            <div className="list-item-main">
+              <div className="list-item-title">{j.CustomerName || '—'}</div>
+              <div className="list-item-sub">{j.JobDate} · {j.Description?.slice(0,40)}</div>
             </div>
-            <div style={{ padding:'6px 16px 10px', display:'flex', gap:8 }}>
-              <button
-                style={{ background:'none', border:'1.5px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:12, cursor:'pointer', color:'#374151' }}
-                onClick={() => setViewPhotos({ jobID: j.JobID, folderUrl: getFolderUrl(j.Notes) })}>
-                📸 Photos
-              </button>
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
+              {j.Division==='Spray' ? <span className="div-spray">Spray</span> : <span className="div-tree">Tree</span>}
+              <span style={{ fontSize:11, fontWeight:700, color: STATUS_COLOR[j.Status]||'#6b7280' }}>{j.Status}</span>
             </div>
           </div>
         ))}
       </div>
 
-      {viewPhotos && (
-        <PhotoViewer
-          jobID={viewPhotos.jobID}
-          folderUrl={viewPhotos.folderUrl}
-          onClose={() => setViewPhotos(null)}
+      {selectedJobID && (
+        <JobDetail
+          jobID={selectedJobID}
+          onBack={() => setSelectedJobID(null)}
         />
       )}
     </div>
