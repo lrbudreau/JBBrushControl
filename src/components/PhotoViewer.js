@@ -6,7 +6,7 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
   const [photos, setPhotos]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState(null);
-  const [driveAuth, setDriveAuth] = useState(isDriveAuthorized());
+  const [driveAuth, setDriveAuth] = useState(true);
 
   useEffect(() => {
     // Load photos from the Photos sheet
@@ -16,14 +16,7 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
     });
   }, [jobID]);
 
-  const authorizeAndLoadThumbnails = async () => {
-    try {
-      await requestDriveAccess();
-      setDriveAuth(true);
-    } catch (e) {
-      console.error('Drive auth failed:', e);
-    }
-  };
+
 
   return (
     <div style={S.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
@@ -45,14 +38,7 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
             </div>
           ) : (
             <>
-              {!driveAuth && (
-                <div style={S.authBanner}>
-                  <p style={{ fontSize: 13, marginBottom: 10 }}>Connect Google Drive to see photo thumbnails.</p>
-                  <button style={S.authBtn} onClick={authorizeAndLoadThumbnails}>
-                    🔗 Connect Drive
-                  </button>
-                </div>
-              )}
+    
 
               <div style={S.grid}>
                 {photos.map((photo, i) => (
