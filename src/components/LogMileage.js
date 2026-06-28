@@ -26,11 +26,16 @@ export default function LogMileage({ onClose }) {
       if (j.status === 'ok') setJobs(j.data);
       if (c.status === 'ok') setCustomers(c.data);
       if (s.status === 'ok') {
-        const addr = s.data.HomeAddress || s.data.Address || '';
-        const city  = s.data.City  || '';
-        const state = s.data.State || 'IN';
-        const zip   = s.data.Zip   || '';
-        setHomeAddress([addr, city, state, zip].filter(Boolean).join(', '));
+        const d     = s.data;
+        const addr  = d.HomeAddress || d.Address || '';
+        const city  = d.City  || '';
+        const state = d.State || 'IN';
+        const zip   = d.Zip   || '';
+        const full  = [addr, city, state + ' ' + zip].filter(Boolean).join(', ').trim();
+        console.log('Home address loaded:', full);
+        setHomeAddress(full);
+      } else {
+        console.warn('getSettings failed:', s);
       }
     });
   }, []);
@@ -57,7 +62,8 @@ export default function LogMileage({ onClose }) {
       const job      = jobs.find(j => j.JobID === jobID);
       const customer = job ? customers.find(c => c.CustomerID === job.CustomerID) : null;
       if (customer) {
-        return [customer.Address, customer.City, customer.State].filter(Boolean).join(', ');
+        const parts = [customer.Address, customer.City, customer.State, customer.Zip].filter(Boolean);
+        return parts.join(', ');
       }
       return '';
     }
@@ -97,17 +103,32 @@ export default function LogMileage({ onClose }) {
 
     if (!addrA || !addrB) return toast('Set both Point A and Point B first', 'error');
 
+    // Guard: if home address not loaded yet, warn user
+    if (addrA === 'home' || addrB === 'home') {
+      return toast('Home address not loaded yet — wait a moment and try again', 'error');
+    }
+
+    console.log('Calculating distance from:', addrA, 'to:', addrB);
     setCalc(i);
     try {
       const ORS_KEY = process.env.REACT_APP_ORS_KEY;
 
-      // Geocode both addresses
+      // Use Google Geocoding API for rural Indiana addresses (much better accuracy)
+      // 10,000 free requests/month — a small business will never exceed this
+      const GMAPS_KEY = 'AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs';
       const geocode = async (addr) => {
+        const hasState = /IN|indiana/i.test(addr);
+        const fullAddr = hasState ? addr : addr + ', IN';
         const res  = await fetch(
-          `https://api.openrouteservice.org/geocode/search?api_key=${ORS_KEY}&text=${encodeURIComponent(addr + ', Indiana, USA')}&boundary.country=US&size=1`
+          `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddr)}&key=${GMAPS_KEY}`
         );
         const data = await res.json();
-        if (data.features?.length > 0) return data.features[0].geometry.coordinates; // [lng, lat]
+        if (data.status === 'OK' && data.results?.length > 0) {
+          const loc = data.results[0].geometry.location;
+          console.log('Geocoded "' + addr + '" ->', data.results[0].formatted_address, loc);
+          return [loc.lng, loc.lat]; // ORS expects [lng, lat]
+        }
+        console.error('Geocode failed for:', addr, data.status);
         throw new Error('Address not found: ' + addr);
       };
 
