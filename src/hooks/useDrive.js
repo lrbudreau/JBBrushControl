@@ -1,123 +1,134 @@
 import { CONFIG } from '../config';
 
-let gapiReady = false;
-let tokenClient = null;
 let accessToken = null;
+let tokenExpiry  = null;
 
-// Initialize Google API
-export async function initGoogleDrive() {
-  return new Promise((resolve) => {
-    if (gapiReady) { resolve(true); return; }
-    window.gapi.load('client', async () => {
-      await window.gapi.client.init({
-        apiKey: CONFIG.GOOGLE_API_KEY,
-        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-      });
-      gapiReady = true;
-      resolve(true);
-    });
+// ── Initialize Google Identity Services ──────────────────────
+function loadGsiScript() {
+  return new Promise(resolve => {
+    if (window.google?.accounts?.oauth2) { resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.onload = resolve;
+    document.head.appendChild(script);
   });
 }
 
-// Request Drive access token
+// ── Request Drive access token ────────────────────────────────
 export async function requestDriveAccess() {
+  // Return cached token if still valid
+  if (accessToken && tokenExpiry && Date.now() < tokenExpiry) return accessToken;
+
+  await loadGsiScript();
+
   return new Promise((resolve, reject) => {
-    if (accessToken) { resolve(accessToken); return; }
-    tokenClient = window.google.accounts.oauth2.initTokenClient({
+    const client = window.google.accounts.oauth2.initTokenClient({
       client_id: CONFIG.GOOGLE_CLIENT_ID,
       scope: CONFIG.DRIVE_SCOPE,
       callback: (response) => {
-        if (response.error) { reject(response.error); return; }
+        if (response.error) { reject(new Error(response.error)); return; }
         accessToken = response.access_token;
+        tokenExpiry = Date.now() + (response.expires_in * 1000) - 60000;
         resolve(accessToken);
       },
     });
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    client.requestAccessToken({ prompt: '' }); // '' = no prompt if already authorized
   });
 }
 
-// Find or create a folder in Drive
+// ── Drive API helpers ─────────────────────────────────────────
+async function driveGet(url) {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  return res.json();
+}
+
+async function drivePost(url, body, isMultipart = false) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: isMultipart
+      ? { Authorization: `Bearer ${accessToken}` }
+      : { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: isMultipart ? body : JSON.stringify(body),
+  });
+  return res.json();
+}
+
+// ── Find or create a Drive folder ────────────────────────────
 async function findOrCreateFolder(name, parentId = null) {
-  const token = accessToken;
-  const query = parentId
+  const q = parentId
     ? `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`
     : `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
 
-  const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
-    { headers: { Authorization: `Bearer ${token}` } }
+  const search = await driveGet(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&key=${CONFIG.GOOGLE_API_KEY}`
   );
-  const searchData = await searchRes.json();
 
-  if (searchData.files && searchData.files.length > 0) {
-    return searchData.files[0].id;
-  }
+  if (search.files && search.files.length > 0) return search.files[0].id;
 
-  // Create folder
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name,
-      mimeType: 'application/vnd.google-apps.folder',
-      ...(parentId ? { parents: [parentId] } : {}),
-    }),
+  const folder = await drivePost('https://www.googleapis.com/drive/v3/files', {
+    name,
+    mimeType: 'application/vnd.google-apps.folder',
+    ...(parentId ? { parents: [parentId] } : {}),
   });
-  const folder = await createRes.json();
   return folder.id;
 }
 
-// Get or create the job photos folder path: JB Brush Control / Jobs / {jobID}
+// ── Get or create job photos folder ──────────────────────────
 export async function getJobFolder(jobID, customerName) {
-  await initGoogleDrive();
-  if (!accessToken) await requestDriveAccess();
-
-  const rootId    = await findOrCreateFolder(CONFIG.DRIVE_ROOT_FOLDER);
-  const jobsId    = await findOrCreateFolder('Jobs', rootId);
+  const rootId   = await findOrCreateFolder(CONFIG.DRIVE_ROOT_FOLDER);
+  const jobsId   = await findOrCreateFolder('Jobs', rootId);
   const folderName = `${jobID} — ${customerName || 'Job'}`;
-  const folderId  = await findOrCreateFolder(folderName, jobsId);
-
+  const folderId = await findOrCreateFolder(folderName, jobsId);
   return {
     folderId,
     folderUrl: `https://drive.google.com/drive/folders/${folderId}`,
   };
 }
 
-// Upload a photo file to a Drive folder
+// ── Upload a photo file ───────────────────────────────────────
 export async function uploadPhoto(file, folderId) {
-  if (!accessToken) await requestDriveAccess();
-
   const metadata = {
     name: file.name || `photo_${Date.now()}.jpg`,
     parents: [folderId],
   };
 
-  const formData = new FormData();
-  formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  formData.append('file', file);
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', file);
 
-  const res = await fetch(
+  const result = await drivePost(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,thumbnailLink',
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}` },
-      body: formData,
-    }
+    form,
+    true
   );
-  return await res.json();
+
+  // Make the file publicly viewable so thumbnails work
+  if (result.id) {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${result.id}/permissions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+    });
+  }
+
+  return result;
 }
 
-// List photos in a folder
-export async function listPhotos(folderId) {
+// ── List photos in a folder ───────────────────────────────────
+export async function listPhotosInFolder(folderId) {
   if (!accessToken) await requestDriveAccess();
-
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,webViewLink,thumbnailLink,mimeType)`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+  const data = await driveGet(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${folderId}' in parents and trashed=false`)}&fields=files(id,name,webViewLink,thumbnailLink,mimeType,createdTime)&orderBy=createdTime`
   );
-  const data = await res.json();
   return data.files || [];
+}
+
+// ── Check if Drive is already authorized ─────────────────────
+export function isDriveAuthorized() {
+  return !!(accessToken && tokenExpiry && Date.now() < tokenExpiry);
 }
