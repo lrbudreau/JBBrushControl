@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import PhotoViewer from '../components/PhotoViewer';
 import { api } from '../api';
 import { toast } from '../components/Toast';
 
@@ -123,9 +124,10 @@ export function MobileMileage() {
 
 // ── Jobs Page (mobile) ────────────────────────────────────────
 export function MobileJobs() {
-  const [jobs, setJobs]   = useState([]);
+  const [jobs, setJobs]       = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('All');
+  const [filter, setFilter]   = useState('All');
+  const [viewPhotos, setViewPhotos] = useState(null); // { jobID, folderUrl }
 
   useEffect(() => {
     api('getJobs').then(r => {
@@ -136,6 +138,13 @@ export function MobileJobs() {
 
   const STATUS_COLOR = { Scheduled:'#d97706', 'In Progress':'#2d6a2d', Complete:'#6b7280', Quoted:'#1d6fa4', Invoiced:'#6b7280' };
   const visible = jobs.filter(j => filter==='All' || j.Division===filter);
+
+  // Extract Drive folder URL from job notes
+  const getFolderUrl = (notes) => {
+    if (!notes) return null;
+    const match = notes.match(/Photos: (https:\/\/drive\.google\.com\/[^\n]+)/);
+    return match ? match[1] : null;
+  };
 
   return (
     <div className="page-pad">
@@ -148,18 +157,35 @@ export function MobileJobs() {
         {loading ? <div className="card-body"><p className="text-muted">Loading…</p></div>
         : visible.length === 0 ? <div className="empty"><div className="empty-icon">🔧</div><p>No jobs found.</p></div>
         : visible.map(j => (
-          <div key={j.JobID} className="list-item">
-            <div className="list-item-main">
-              <div className="list-item-title">{j.CustomerName || '—'}</div>
-              <div className="list-item-sub">{j.JobDate} · {j.Description?.slice(0,40)}</div>
+          <div key={j.JobID}>
+            <div className="list-item">
+              <div className="list-item-main">
+                <div className="list-item-title">{j.CustomerName || '—'}</div>
+                <div className="list-item-sub">{j.JobDate} · {j.Description?.slice(0,40)}</div>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
+                {j.Division==='Spray' ? <span className="div-spray">Spray</span> : <span className="div-tree">Tree</span>}
+                <span style={{ fontSize:11, fontWeight:700, color: STATUS_COLOR[j.Status]||'#6b7280' }}>{j.Status}</span>
+              </div>
             </div>
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
-              {j.Division==='Spray' ? <span className="div-spray">Spray</span> : <span className="div-tree">Tree</span>}
-              <span style={{ fontSize:11, fontWeight:700, color: STATUS_COLOR[j.Status]||'#6b7280' }}>{j.Status}</span>
+            <div style={{ padding:'6px 16px 10px', display:'flex', gap:8 }}>
+              <button
+                style={{ background:'none', border:'1.5px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:12, cursor:'pointer', color:'#374151' }}
+                onClick={() => setViewPhotos({ jobID: j.JobID, folderUrl: getFolderUrl(j.Notes) })}>
+                📸 Photos
+              </button>
             </div>
           </div>
         ))}
       </div>
+
+      {viewPhotos && (
+        <PhotoViewer
+          jobID={viewPhotos.jobID}
+          folderUrl={viewPhotos.folderUrl}
+          onClose={() => setViewPhotos(null)}
+        />
+      )}
     </div>
   );
 }
