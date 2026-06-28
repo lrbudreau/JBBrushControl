@@ -20,13 +20,19 @@ export default function LogMileage({ onClose }) {
       api('getEquipment'),
       api('getJobs'),
       api('getCustomers'),
-    ]).then(([e, j, c]) => {
+      api('getSettings'),
+    ]).then(([e, j, c, s]) => {
       if (e.status === 'ok') setEquip(e.data.filter(x => ['Truck','Trailer'].includes(x.Type)));
       if (j.status === 'ok') setJobs(j.data);
       if (c.status === 'ok') setCustomers(c.data);
+      if (s.status === 'ok') {
+        const addr = s.data.HomeAddress || s.data.Address || '';
+        const city  = s.data.City  || '';
+        const state = s.data.State || 'IN';
+        const zip   = s.data.Zip   || '';
+        setHomeAddress([addr, city, state, zip].filter(Boolean).join(', '));
+      }
     });
-    // Get home address from settings
-    api('getDashboard').then(() => {}); // just to warm up
   }, []);
 
   function blankEntry() {
@@ -105,8 +111,8 @@ export default function LogMileage({ onClose }) {
     if (!addrA || !addrB) {
       return toast('Set both Point A and Point B first', 'error');
     }
-    if (addrA === 'home' || addrB === 'home') {
-      return toast('Add HomeAddress to Settings sheet first', 'info');
+    if (!addrA || !addrB) {
+      return toast('Could not resolve address — check Settings', 'info');
     }
 
     setCalc(i);
