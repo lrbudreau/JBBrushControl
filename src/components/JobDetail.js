@@ -13,8 +13,7 @@ export default function JobDetail({ jobID, onBack }) {
   const [showPhotos, setShowPhotos] = useState(false);
   const [modal, setModal]       = useState(null);
   const [saving, setSaving]     = useState(false);
-  const [jobDate, setJobDate]     = useState('');
-  const [jobEndDate, setJobEndDate] = useState('');
+
   const [dueDate, setDueDate]   = useState('');
   const [paidModal, setPaidModal] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -44,7 +43,7 @@ export default function JobDetail({ jobID, onBack }) {
   // Accept estimate → prompt for job date → schedule job
   const acceptEstimate = async (est) => {
     setSaving(true);
-    const r = await api('acceptEstimate', {}, { EstimateID: est.EstimateID, JobDate: jobDate, JobEndDate: jobEndDate });
+    const r = await api('acceptEstimate', {}, { EstimateID: est.EstimateID });
     if (r.status === 'ok') { toast('Estimate accepted — job scheduled! ✅'); load(); setModal(null); }
     else toast(r.message, 'error');
     setSaving(false);
@@ -267,49 +266,28 @@ export default function JobDetail({ jobID, onBack }) {
         )}
       </div>
 
-      {/* Accept estimate modal with schedule view */}
+      {/* Accept estimate modal - simple confirm */}
       {modal?.type === 'accept' && (
         <div style={S.modalOverlay} onClick={e => e.target===e.currentTarget && setModal(null)}>
           <div style={S.modalSheet}>
             <div style={S.modalHandle}/>
             <div style={S.modalHeader}>
-              <h3 style={{ fontSize:17, fontWeight:700 }}>Accept & Schedule</h3>
+              <h3 style={{ fontSize:17, fontWeight:700 }}>Accept Estimate</h3>
               <button style={S.closeBtn} onClick={() => setModal(null)}>✕</button>
             </div>
-            <div style={{ padding:16, overflowY:'auto', maxHeight:'70vh' }}>
-              <div style={{ background:'#e8f5e8', borderRadius:8, padding:'12px 14px', marginBottom:14 }}>
-                <div style={{ fontWeight:700 }}>{modal.est.EstimateID}</div>
-                <div style={{ fontSize:13 }}>Total: <strong>${parseFloat(modal.est.Total||0).toFixed(2)}</strong></div>
+            <div style={{ padding:16 }}>
+              <div style={{ background:'#e8f5e8', borderRadius:8, padding:'14px 16px', marginBottom:14 }}>
+                <div style={{ fontWeight:700, fontSize:15 }}>{modal.est.EstimateID}</div>
+                <div style={{ fontSize:18, fontWeight:800, color:'#1a4a1a', marginTop:4 }}>${parseFloat(modal.est.Total||0).toFixed(2)}</div>
               </div>
-
-              <div style={{ display:'flex', gap:10 }}>
-                <div style={{ flex:1 }}>
-                  <div style={S.label}>Start date *</div>
-                  <input type="date" style={S.input} value={jobDate} onChange={e => setJobDate(e.target.value)} />
-                </div>
-                <div style={{ flex:1 }}>
-                  <div style={S.label}>End date <span style={{ fontWeight:400, color:'#9ca3af' }}>(if multi-day)</span></div>
-                  <input type="date" style={S.input} value={jobEndDate} onChange={e => setJobEndDate(e.target.value)}
-                    min={jobDate} placeholder="Same day" />
-                </div>
-              </div>
-              {jobDate && jobEndDate && jobEndDate > jobDate && (
-                <div style={{ fontSize:12, color:'#1d6fa4', fontWeight:600, marginTop:4 }}>
-                  📅 {getDayCount(jobDate, jobEndDate)} day job
-                </div>
-              )}
-
-              {/* Schedule availability */}
-              <SchedulePreview selectedDate={jobDate} endDate={jobEndDate} currentJobID={jobID} onSelectDate={setJobDate} />
-
-              <div style={{ fontSize:12, color:'#6b7280', marginTop:10 }}>
-                Accepting will schedule this job and mark the estimate as Accepted.
+              <div style={{ fontSize:14, color:'#374151', lineHeight:1.6 }}>
+                Accepting this estimate will move the job to <strong>Scheduled</strong> status.
               </div>
             </div>
             <div style={S.modalFooter}>
               <button style={S.cancelBtn} onClick={() => setModal(null)}>Cancel</button>
-              <button style={{ ...S.confirmBtn, background:'#2d6a2d' }} onClick={() => acceptEstimate(modal.est)} disabled={saving || !jobDate}>
-                {saving ? 'Saving…' : '✅ Accept & Schedule'}
+              <button style={{ ...S.confirmBtn, background:'#2d6a2d' }} onClick={() => acceptEstimate(modal.est)} disabled={saving}>
+                {saving ? 'Saving…' : '✅ Accept'}
               </button>
             </div>
           </div>
@@ -392,28 +370,6 @@ export default function JobDetail({ jobID, onBack }) {
   );
 }
 
-function getDayCount(start, end) {
-  const s = new Date(start + 'T00:00:00');
-  const e = new Date(end   + 'T00:00:00');
-  return Math.round((e - s) / 86400000) + 1;
-}
-
-function SchedulePreview({ selectedDate, endDate, currentJobID, onSelectDate }) {
-  const [jobs, setJobs]       = useState([]);
-  const [viewMonth, setViewMonth] = useState(() => {
-    const d = selectedDate ? new Date(selectedDate + 'T00:00:00') : new Date();
-    return { year: d.getFullYear(), month: d.getMonth() };
-  });
-
-  useEffect(() => {
-    api('getJobs').then(r => {
-      if (r.status === 'ok') {
-        setJobs(r.data.filter(j =>
-          j.Status === 'Scheduled' &&
-          j.JobID !== currentJobID &&
-          j.JobDate
-        ));
-      }
     });
   }, [currentJobID]);
 
