@@ -67,3 +67,22 @@ export function isOwner() {
   const u = getUser();
   return u && u.Role === 'owner';
 }
+
+// ── Date formatting ───────────────────────────────────────────
+// Converts any date string (ISO, YYYY-MM-DD, etc.) to MM/DD/YYYY
+export function formatDate(val) {
+  if (!val) return '';
+  try {
+    // Handle ISO timestamps like 2026-06-28T04:00:00.000Z
+    // Force parse as local date for YYYY-MM-DD strings to avoid timezone shift
+    let d;
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      const [y,m,day] = val.split('-');
+      d = new Date(parseInt(y), parseInt(m)-1, parseInt(day));
+    } else {
+      d = new Date(val);
+    }
+    if (isNaN(d.getTime())) return String(val);
+    return d.toLocaleDateString('en-US', { month:'2-digit', day:'2-digit', year:'numeric' });
+  } catch { return String(val); }
+}
