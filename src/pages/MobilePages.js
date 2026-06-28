@@ -183,24 +183,55 @@ export function MobileJobs() {
 }
 
 // ── Expenses Page (mobile) ────────────────────────────────────
-const CATS = ['Fuel Expense','Parts and Repairs','Supplies','Assets','Taxes and Licenses','Insurance','Utilities','Legal and Professional','Office Expense','Other'];
+const CATS = ['Fuel','Chemical','Parts and Repairs','Supplies','Assets','Taxes and Licenses','Insurance','Utilities','Legal and Professional','Office Expense','Other'];
 
 export function MobileExpenses() {
-  const [jobs, setJobs]     = useState([]);
-  const [modal, setModal]   = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ Date: today(), Category:'Fuel Expense', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' });
+  const [jobs, setJobs]       = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [modal, setModal]     = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [receipt, setReceipt] = useState(null);
+  const fileRef = React.useRef();
+  const [form, setForm] = useState({ Date: today(), Category:'Fuel', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' });
 
-  useEffect(() => { api('getJobs').then(r => { if (r.status==='ok') setJobs(r.data); }); }, []);
+  useEffect(() => {
+    Promise.all([api('getJobs'), api('getVendors')]).then(([j, v]) => {
+      if (j.status==='ok') setJobs(j.data);
+      if (v.status==='ok') setVendors(v.data.filter(x => x.Active===true || String(x.Active).toUpperCase()==='TRUE'));
+    });
+  }, []);
 
   const f = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
+
+  const handleReceipt = (e) => {
+    const file = e.target.files[0];
+    if (file) setReceipt(file);
+  };
 
   const save = async () => {
     if (!form.Amount) return toast('Enter an amount', 'error');
     setSaving(true);
-    const r = await api('addExpense', {}, form);
-    if (r.status === 'ok') { toast('Expense logged!'); setModal(false); setForm({ Date: today(), Category:'Fuel Expense', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' }); }
-    else toast(r.message, 'error');
+    let receiptFileID = '', receiptUrl = '';
+    // Upload receipt photo if selected
+    if (receipt) {
+      try {
+        const { getJobFolder, uploadPhoto, requestDriveAccess } = await import('../hooks/useDrive');
+        await requestDriveAccess();
+        const rootFolder = await import('../hooks/useDrive').then(m => m.getJobFolder('Receipts', 'Expenses'));
+        const result = await uploadPhoto(receipt, rootFolder.folderId);
+        if (result.id) {
+          receiptFileID = result.id;
+          receiptUrl    = result.webViewLink || '';
+        }
+      } catch(e) { toast('Receipt upload failed — saving expense without it', 'info'); }
+    }
+    const r = await api('addExpense', {}, { ...form, ReceiptFileID: receiptFileID, ReceiptUrl: receiptUrl });
+    if (r.status === 'ok') {
+      toast('Expense logged!');
+      setModal(false);
+      setReceipt(null);
+      setForm({ Date: today(), Category:'Fuel', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' });
+    } else toast(r.message, 'error');
     setSaving(false);
   };
 
@@ -208,7 +239,7 @@ export function MobileExpenses() {
     <div className="page-pad">
       <button style={bigBtnStyle('#d97706')} onClick={() => setModal(true)}>
         <span style={{ fontSize:28 }}>💸</span>
-        <div><div style={{ fontSize:17, fontWeight:800 }}>Log Expense</div><div style={{ fontSize:12, opacity:0.75 }}>Fuel, parts, supplies…</div></div>
+        <div><div style={{ fontSize:17, fontWeight:800 }}>Log Expense</div><div style={{ fontSize:12, opacity:0.75 }}>Fuel, chemicals, parts…</div></div>
       </button>
 
       {modal && (
@@ -229,7 +260,15 @@ export function MobileExpenses() {
                 </select>
               </div>
               <div className="form-group"><label>Amount ($) *</label><input type="number" name="Amount" value={form.Amount} onChange={f} inputMode="decimal" step="0.01" placeholder="0.00" /></div>
-              <div className="form-group"><label>Vendor</label><input name="Vendor" value={form.Vendor} onChange={f} /></div>
+              <div className="form-group"><label>Vendor</label>
+                <select name="Vendor" value={form.Vendor} onChange={f}>
+                  <option value="">— Select or type —</option>
+                  {vendors.map(v => <option key={v.VendorID} value={v.Name}>{v.Name}</option>)}
+                </select>
+                {!vendors.find(v => v.Name === form.Vendor) && form.Vendor && (
+                  <input name="Vendor" value={form.Vendor} onChange={f} placeholder="Or type vendor name" style={{ marginTop:6, width:'100%', minHeight:46, padding:'10px 12px', border:'2px solid #d1d5db', borderRadius:8, fontSize:15 }} />
+                )}
+              </div>
               <div className="form-group"><label>Description</label><input name="Description" value={form.Description} onChange={f} /></div>
               <div className="form-group"><label>Job (optional)</label>
                 <select name="JobID" value={form.JobID} onChange={f}>
@@ -237,6 +276,12 @@ export function MobileExpenses() {
                   {jobs.map(j => <option key={j.JobID} value={j.JobID}>{j.CustomerName} — {j.Description?.slice(0,30)}</option>)}
                 </select>
               </div>
+              {/* Receipt photo */}
+              <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:'none' }} onChange={handleReceipt} />
+              <button onClick={() => fileRef.current.click()}
+                style={{ display:'block', width:'100%', padding:10, border:'2px dashed #d1d5db', borderRadius:8, background: receipt?'#e8f5e8':'transparent', color: receipt?'#1a4a1a':'#6b7280', fontSize:13, cursor:'pointer', marginBottom:8 }}>
+                {receipt ? `📎 ${receipt.name}` : '📎 Attach receipt photo (optional)'}
+              </button>
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline btn-full" style={{ flex:1 }} onClick={() => setModal(false)}>Cancel</button>
