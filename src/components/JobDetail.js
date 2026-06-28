@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, formatDate } from '../api';
 import { toast } from './Toast';
 import PhotoViewer from './PhotoViewer';
 import { downloadInvoicePDF } from './InvoicePDF';
@@ -229,7 +229,7 @@ export default function JobDetail({ jobID, onBack }) {
                   <div>
                     <div style={{ fontWeight:700, fontSize:15 }}>{inv.InvoiceID}</div>
                     <div style={{ fontSize:12, color:'#6b7280' }}>
-                      Issued {inv.IssueDate}{inv.DueDate ? ` · Due ${inv.DueDate}` : ''}
+                      Issued {formatDate(inv.IssueDate)}{inv.DueDate ? ` · Due ${formatDate(inv.DueDate)}` : ''}
                     </div>
                   </div>
                   <div style={{ textAlign:'right' }}>
@@ -256,7 +256,7 @@ export default function JobDetail({ jobID, onBack }) {
                   )}
                   {inv.Status === 'Paid' && (
                     <div style={{ fontSize:13, color:'#2d6a2d', fontWeight:700, padding:'8px 0' }}>
-                      ✅ Paid {inv.PaidDate ? `on ${inv.PaidDate}` : ''} {inv.PaymentMethod ? `· ${inv.PaymentMethod}` : ''}
+                      ✅ Paid {inv.PaidDate ? `on ${formatDate(inv.PaidDate)}` : ''} {inv.PaymentMethod ? `· ${inv.PaymentMethod}` : ''}
                     </div>
                   )}
                 </div>
