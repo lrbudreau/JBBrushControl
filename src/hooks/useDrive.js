@@ -1,72 +1,111 @@
+// Service account Drive integration — no user login required
+// The service account key is injected at build time via REACT_APP_GOOGLE_SA_KEY
+
 import { CONFIG } from '../config';
 
-let accessToken = null;
-let tokenExpiry  = null;
-let tokenClient  = null;
+let _token = null;
+let _tokenExpiry = null;
 
-function loadGsiScript() {
-  return new Promise(resolve => {
-    if (window.google?.accounts?.oauth2) { resolve(); return; }
-    const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
-    if (existing) { existing.onload = resolve; return; }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.onload = resolve;
-    document.head.appendChild(script);
-  });
-}
-
-export async function requestDriveAccess(forcePrompt = false) {
-  // Return cached token if still valid
-  if (!forcePrompt && accessToken && tokenExpiry && Date.now() < tokenExpiry) {
-    return accessToken;
+// ── Parse service account key ────────────────────────────────
+function getServiceAccountKey() {
+  try {
+    const raw = process.env.REACT_APP_GOOGLE_SA_KEY;
+    if (!raw) throw new Error('Service account key not found');
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Service account key error:', e);
+    return null;
   }
-
-  await loadGsiScript();
-
-  return new Promise((resolve, reject) => {
-    if (!tokenClient) {
-      tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        scope: CONFIG.DRIVE_SCOPE,
-        // No prompt after first auth — reuses existing consent
-        callback: (response) => {
-          if (response.error) { reject(new Error(response.error)); return; }
-          accessToken = response.access_token;
-          tokenExpiry = Date.now() + ((response.expires_in || 3600) * 1000) - 60000;
-          resolve(accessToken);
-        },
-      });
-    } else {
-      // Update callback for this request
-      tokenClient.callback = (response) => {
-        if (response.error) { reject(new Error(response.error)); return; }
-        accessToken = response.access_token;
-        tokenExpiry = Date.now() + ((response.expires_in || 3600) * 1000) - 60000;
-        resolve(accessToken);
-      };
-    }
-    // Empty prompt string = silent refresh if already authorized, only asks once per session
-    tokenClient.requestAccessToken({ prompt: forcePrompt ? 'select_account' : '' });
-  });
 }
 
+// ── Generate JWT for service account auth ────────────────────
+async function generateJWT(key) {
+  const now    = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claim  = {
+    iss:   key.client_email,
+    scope: 'https://www.googleapis.com/auth/drive.file',
+    aud:   'https://oauth2.googleapis.com/token',
+    exp:   now + 3600,
+    iat:   now,
+  };
+
+  const b64 = obj => btoa(JSON.stringify(obj))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+  const unsigned = `${b64(header)}.${b64(claim)}`;
+
+  // Import the private key
+  const pemBody = key.private_key
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\n/g, '');
+
+  const binaryDer = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+
+  const cryptoKey = await window.crypto.subtle.importKey(
+    'pkcs8', binaryDer.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false, ['sign']
+  );
+
+  const signature = await window.crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5', cryptoKey,
+    new TextEncoder().encode(unsigned)
+  );
+
+  const b64sig = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+  return `${unsigned}.${b64sig}`;
+}
+
+// ── Get access token ─────────────────────────────────────────
+async function getAccessToken() {
+  if (_token && _tokenExpiry && Date.now() < _tokenExpiry) return _token;
+
+  const key = getServiceAccountKey();
+  if (!key) throw new Error('No service account key configured');
+
+  const jwt = await generateJWT(key);
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion:  jwt,
+    }),
+  });
+
+  const data = await res.json();
+  if (!data.access_token) throw new Error('Failed to get access token: ' + JSON.stringify(data));
+
+  _token       = data.access_token;
+  _tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000;
+  return _token;
+}
+
+// ── Drive API helpers ─────────────────────────────────────────
 async function driveGet(url) {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const token = await getAccessToken();
+  const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   return res.json();
 }
 
 async function drivePost(url, body, isMultipart = false) {
-  const res = await fetch(url, {
+  const token = await getAccessToken();
+  const res   = await fetch(url, {
     method: 'POST',
     headers: isMultipart
-      ? { Authorization: `Bearer ${accessToken}` }
-      : { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      ? { Authorization: `Bearer ${token}` }
+      : { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: isMultipart ? body : JSON.stringify(body),
   });
   return res.json();
 }
 
+// ── Find or create folder ─────────────────────────────────────
 async function findOrCreateFolder(name, parentId = null) {
   const q = parentId
     ? `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`
@@ -86,6 +125,7 @@ async function findOrCreateFolder(name, parentId = null) {
   return folder.id;
 }
 
+// ── Get or create job photos folder ──────────────────────────
 export async function getJobFolder(jobID, customerName) {
   const rootId   = await findOrCreateFolder(CONFIG.DRIVE_ROOT_FOLDER);
   const jobsId   = await findOrCreateFolder('Jobs', rootId);
@@ -93,11 +133,14 @@ export async function getJobFolder(jobID, customerName) {
   return { folderId, folderUrl: `https://drive.google.com/drive/folders/${folderId}` };
 }
 
+// ── Upload photo ──────────────────────────────────────────────
 export async function uploadPhoto(file, folderId) {
+  const token    = await getAccessToken();
   const metadata = {
-    name: file.name || `photo_${Date.now()}.jpg`,
+    name:    file.name || `photo_${Date.now()}.jpg`,
     parents: [folderId],
   };
+
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', file);
@@ -107,14 +150,17 @@ export async function uploadPhoto(file, folderId) {
     form, true
   );
 
-  // Make publicly viewable
+  // Make publicly viewable so thumbnails work without auth
   if (result.id) {
     await fetch(`https://www.googleapis.com/drive/v3/files/${result.id}/permissions`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ role: 'reader', type: 'anyone' }),
     });
-    // Get a fresh thumbnail after making public
+    // Fetch fresh metadata with thumbnail
     const meta = await driveGet(
       `https://www.googleapis.com/drive/v3/files/${result.id}?fields=id,name,webViewLink,thumbnailLink`
     );
@@ -123,14 +169,14 @@ export async function uploadPhoto(file, folderId) {
   return result;
 }
 
+// ── List photos in folder ─────────────────────────────────────
 export async function listPhotosInFolder(folderId) {
-  if (!accessToken) await requestDriveAccess();
   const data = await driveGet(
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${folderId}' in parents and trashed=false`)}&fields=files(id,name,webViewLink,thumbnailLink,mimeType,createdTime)&orderBy=createdTime`
   );
   return data.files || [];
 }
 
-export function isDriveAuthorized() {
-  return !!(accessToken && tokenExpiry && Date.now() < tokenExpiry);
-}
+// ── No longer needed — kept for compatibility ─────────────────
+export function isDriveAuthorized() { return true; }
+export async function requestDriveAccess() { return getAccessToken(); }
