@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { api, clearSession, getUser } from '../api';
+import { api, clearSession, getUser, formatDate } from '../api';
 import AdminLogin from './AdminLogin';
 import SheetGrid, { StatusBadge, DivisionBadge, CurrencyCell } from './SheetGrid';
 import { toast, ToastContainer, useToast } from '../components/Toast';
@@ -258,11 +258,11 @@ function AdminInvoices() {
     { key:'InvoiceID',    label:'Invoice #',   width:110 },
     { key:'CustomerName', label:'Customer',    width:150 },
     { key:'Division',     label:'Division',    width:80,  render: DivisionBadge },
-    { key:'IssueDate',    label:'Issued',      width:100 },
+    { key:'IssueDate',    label:'Issued',      width:110, render: v => formatDate(v) },
     { key:'DueDate',      label:'Due',         width:100 },
     { key:'Total',        label:'Total',       width:100, render: CurrencyCell },
     { key:'Status',       label:'Status',      width:130, render: StatusBadge },
-    { key:'PaidDate',     label:'Paid',        width:100 },
+    { key:'PaidDate',     label:'Paid',        width:110, render: v => formatDate(v) },
     { key:'PaymentMethod',label:'Payment',     width:100 },
     { key:'_actions',     label:'Actions',     width:220, render: (_, row) => (
       <div style={{display:'flex',gap:4}}>
@@ -582,7 +582,7 @@ function AdminHours() {
   const cols = [
     { key:'EmployeeName', label:'Employee',  width:130 },
     { key:'Date',         label:'Date',      width:100 },
-    { key:'ClockIn',      label:'Clock In',  width:150, render: v => v ? new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '—' },
+    { key:'ClockIn',      label:'Clock In',  width:150, render: v => v ? formatDate(v) + ' ' + new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '—' },
     { key:'ClockOut',     label:'Clock Out', width:150, render: v => v ? new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : <span className="admin-badge admin-badge-green">Active</span> },
     { key:'TotalHours',   label:'Hours',     width:80,  render: v => <strong>{v||'—'}</strong> },
     { key:'Notes',        label:'Notes',     width:200 },
