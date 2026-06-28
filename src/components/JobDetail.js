@@ -266,23 +266,28 @@ export default function JobDetail({ jobID, onBack }) {
         )}
       </div>
 
-      {/* Accept estimate modal */}
+      {/* Accept estimate modal with schedule view */}
       {modal?.type === 'accept' && (
         <div style={S.modalOverlay} onClick={e => e.target===e.currentTarget && setModal(null)}>
           <div style={S.modalSheet}>
             <div style={S.modalHandle}/>
             <div style={S.modalHeader}>
-              <h3 style={{ fontSize:17, fontWeight:700 }}>Accept Estimate</h3>
+              <h3 style={{ fontSize:17, fontWeight:700 }}>Accept & Schedule</h3>
               <button style={S.closeBtn} onClick={() => setModal(null)}>✕</button>
             </div>
-            <div style={{ padding:16 }}>
-              <div style={{ background:'#e8f5e8', borderRadius:8, padding:'12px 14px', marginBottom:16 }}>
+            <div style={{ padding:16, overflowY:'auto', maxHeight:'70vh' }}>
+              <div style={{ background:'#e8f5e8', borderRadius:8, padding:'12px 14px', marginBottom:14 }}>
                 <div style={{ fontWeight:700 }}>{modal.est.EstimateID}</div>
                 <div style={{ fontSize:13 }}>Total: <strong>${parseFloat(modal.est.Total||0).toFixed(2)}</strong></div>
               </div>
-              <div style={S.label}>Schedule job date *</div>
+
+              <div style={S.label}>Pick a job date *</div>
               <input type="date" style={S.input} value={jobDate} onChange={e => setJobDate(e.target.value)} />
-              <div style={{ fontSize:12, color:'#6b7280', marginTop:8 }}>
+
+              {/* Schedule availability */}
+              <SchedulePreview selectedDate={jobDate} currentJobID={jobID} />
+
+              <div style={{ fontSize:12, color:'#6b7280', marginTop:10 }}>
                 Accepting will schedule this job and mark the estimate as Accepted.
               </div>
             </div>
@@ -367,6 +372,76 @@ export default function JobDetail({ jobID, onBack }) {
 
       {showPhotos && (
         <PhotoViewer jobID={jobID} folderUrl={folderUrl} onClose={() => setShowPhotos(false)} />
+      )}
+    </div>
+  );
+}
+
+function SchedulePreview({ selectedDate, currentJobID }) {
+  const [jobs, setJobs] = useState([]);
+  useEffect(() => {
+    api('getJobs').then(r => {
+      if (r.status === 'ok') {
+        setJobs(r.data.filter(j =>
+          j.Status === 'Scheduled' &&
+          j.JobID !== currentJobID &&
+          j.JobDate
+        ));
+      }
+    });
+  }, [currentJobID]);
+
+  if (!selectedDate) return null;
+
+  // Get jobs for the selected week (Mon-Sun)
+  const sel    = new Date(selectedDate + 'T00:00:00');
+  const day    = sel.getDay(); // 0=Sun
+  const monday = new Date(sel); monday.setDate(sel.getDate() - (day === 0 ? 6 : day - 1));
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+
+  const weekDays = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday); d.setDate(monday.getDate() + i);
+    const dateStr = d.toISOString().split('T')[0];
+    const dayJobs = jobs.filter(j => j.JobDate === dateStr);
+    weekDays.push({ date: dateStr, dayJobs, label: d.toLocaleDateString('en-US',{weekday:'short',month:'numeric',day:'numeric'}) });
+  }
+
+  const hasAny = weekDays.some(d => d.dayJobs.length > 0);
+
+  return (
+    <div style={{ marginTop:14 }}>
+      <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:8 }}>
+        Week of {monday.toLocaleDateString('en-US',{month:'long',day:'numeric'})}
+      </div>
+      {!hasAny ? (
+        <div style={{ background:'#f0fdf4', borderRadius:8, padding:'10px 12px', fontSize:12, color:'#166534', fontWeight:600 }}>
+          ✅ No other jobs scheduled this week
+        </div>
+      ) : (
+        <div style={{ borderRadius:8, overflow:'hidden', border:'1px solid #e5e7eb' }}>
+          {weekDays.map(({ date, dayJobs, label }) => (
+            <div key={date} style={{
+              display:'flex', alignItems:'flex-start', gap:10, padding:'8px 12px',
+              borderBottom:'1px solid #f3f4f6',
+              background: date === selectedDate ? '#fef3c7' : dayJobs.length > 0 ? '#fff7ed' : 'white',
+            }}>
+              <div style={{ minWidth:80, fontSize:12, fontWeight: date===selectedDate ? 700 : 400, color: date===selectedDate ? '#92400e' : '#374151' }}>
+                {label}{date===selectedDate ? ' ← selected' : ''}
+              </div>
+              <div style={{ flex:1 }}>
+                {dayJobs.length === 0 ? (
+                  <span style={{ fontSize:11, color:'#9ca3af' }}>Open</span>
+                ) : dayJobs.map(j => (
+                  <div key={j.JobID} style={{ fontSize:11, color:'#d97706', fontWeight:600 }}>
+                    🔧 {j.CustomerName} — {j.Description?.slice(0,30)}
+                    {j.Priority==='Urgent' && <span style={{ color:'#dc2626' }}> 🔴</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
