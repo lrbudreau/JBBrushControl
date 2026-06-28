@@ -65,9 +65,10 @@ export default function LogMileage({ onClose }) {
       if (field === 'pointBJobID' && next.pointBType === 'job') next.jobID = val;
       if (field === 'pointAJobID' && next.pointAType === 'job') next.jobID = val;
       if (field === 'miles' || field === 'rounds') {
-        const m = parseFloat(field === 'miles' ? val : next.miles) || 0;
-        const r = parseInt(field === 'rounds'  ? val : next.rounds) || 1;
-        if (m) next.totalMiles = ((2*m) * r).toFixed(1);
+        const m = parseFloat(field === 'miles'  ? val : next.miles) || 0;
+        const r = parseInt(field === 'rounds' ? val : next.rounds) || 1;
+        // Each round = there AND back (×2)
+        if (m) next.totalMiles = (m * 2 * r).toFixed(1);
       }
       return next;
     }));
@@ -234,15 +235,15 @@ export default function LogMileage({ onClose }) {
                     value={entry.miles} onChange={e => updateEntry(i,'miles',e.target.value)} />
                 </div>
                 <div style={{ flex:1 }}>
-                  <div style={S.label}>Rounds</div>
+                  <div style={S.label}>Rounds (trips there & back)</div>
                   <input style={S.input} type="number" inputMode="numeric" min="1" placeholder="1"
                     value={entry.rounds} onChange={e => updateEntry(i,'rounds',e.target.value)} />
                 </div>
               </div>
 
-              {parseFloat(entry.miles) > 0 && parseInt(entry.rounds) > 1 && (
+              {parseFloat(entry.miles) > 0 && (
                 <div style={S.entryTotal}>
-                  {entry.miles} mi × {entry.rounds} rounds = <strong>{entry.totalMiles} mi</strong>
+                  {entry.miles} mi × 2 (there & back) × {entry.rounds} round{parseInt(entry.rounds)!==1?'s':''} = <strong>{entry.totalMiles || (parseFloat(entry.miles)*2*parseInt(entry.rounds||1)).toFixed(1)} mi</strong>
                 </div>
               )}
 
