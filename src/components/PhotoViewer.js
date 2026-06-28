@@ -63,6 +63,10 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
                   </div>
                 ))}
               </div>
+
+              {folderUrl && (
+
+              )}
             </>
           )}
         </div>
