@@ -101,19 +101,45 @@ export default function NewJobFlow({ onComplete, onCancel }) {
       if (jobRes.status !== 'ok') { toast('Failed to save job', 'error'); setSaving(false); return; }
       const jobID = jobRes.data.JobID;
 
-      // 3. Upload photos to Drive
+      // 3. Upload photos to Drive and log to Photos sheet
       if (photos.length > 0) {
+        setUploading(true);
         try {
-          setUploading(true);
-          await requestDriveAccess();
-          const { folderId, folderUrl } = await getJobFolder(jobID, customer.Name);
-          for (const photo of photos) await uploadPhoto(photo.file, folderId);
-          await api('updateJob', {}, { JobID: jobID, Notes: (job.Notes ? job.Notes + '\n' : '') + `Photos: ${folderUrl}` });
-          setUploading(false);
+          const drivePromise = (async () => {
+            await requestDriveAccess();
+            const { folderId, folderUrl } = await getJobFolder(jobID, customer.Name);
+            for (const photo of photos) {
+              const result = await uploadPhoto(photo.file, folderId);
+              if (result.id) {
+                // Log each photo to the Photos sheet
+                await api('addPhoto', {}, {
+                  JobID:        jobID,
+                  FileName:     result.name || photo.file.name,
+                  DriveFileID:  result.id,
+                  DriveUrl:     result.webViewLink || `https://drive.google.com/file/d/${result.id}/view`,
+                  ThumbnailUrl: result.thumbnailLink || '',
+                });
+              }
+            }
+            // Update job notes with folder link
+            await api('updateJob', {}, {
+              JobID: jobID,
+              Notes: (job.Notes ? job.Notes + '\n' : '') + `Photos: ${folderUrl}`
+            });
+          })();
+          const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 30000)
+          );
+          await Promise.race([drivePromise, timeout]);
+          toast(`${photos.length} photo(s) uploaded ✅`);
         } catch (e) {
-          toast('Photos skipped — Drive access needed', 'info');
-          setUploading(false);
+          if (e.message === 'timeout') {
+            toast('Photos timed out — job saved, try uploading photos again', 'info');
+          } else {
+            toast('Job saved — could not upload photos: ' + e.message, 'info');
+          }
         }
+        setUploading(false);
       }
 
       // 4. Create estimate if line items exist
