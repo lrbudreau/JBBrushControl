@@ -67,7 +67,7 @@ export default function LogMileage({ onClose }) {
       if (field === 'miles' || field === 'rounds') {
         const m = parseFloat(field === 'miles' ? val : next.miles) || 0;
         const r = parseInt(field === 'rounds'  ? val : next.rounds) || 1;
-        if (m) next.totalMiles = (m * r).toFixed(1);
+        if (m) next.totalMiles = ((2*m) * r).toFixed(1);
       }
       return next;
     }));
