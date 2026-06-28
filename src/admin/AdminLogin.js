@@ -2,37 +2,27 @@ import React, { useState } from 'react';
 import { api, saveSession } from '../api';
 import './admin.css';
 
-// Simple password hash (not cryptographic, just obfuscation for a family app)
-function simpleHash(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash.toString(16);
-}
-
 export default function AdminLogin({ onLogin }) {
-  const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [name, setName]       = useState('');
+  const [pin, setPin]         = useState('');
+  const [error, setError]     = useState('');
+  const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!password) return setError('Enter your password');
+    if (!name.trim()) return setError('Enter your name');
+    if (!pin.trim())  return setError('Enter your PIN');
     setLoading(true);
     setError('');
 
-    // Login using the admin role PIN stored in Settings
-    // We use the name "Admin" with the AdminPIN from Settings
-    const r = await api('login', {}, { name: 'Admin', pin: password });
+    const r = await api('login', {}, { name: name.trim(), pin });
     if (r.status === 'ok' && ['admin', 'owner'].includes(r.data.user.Role)) {
       saveSession(r.data.token, r.data.user);
       onLogin(r.data.user);
     } else if (r.status === 'ok') {
       setError('This account does not have admin access.');
     } else {
-      setError('Incorrect password. Please try again.');
+      setError('Incorrect name or PIN. Please try again.');
     }
     setLoading(false);
   };
@@ -40,19 +30,30 @@ export default function AdminLogin({ onLogin }) {
   return (
     <div className="admin-login-wrap">
       <div className="admin-login-card">
-        <img src="images/logo.svg" alt="JB Brush Control" style={{ maxWidth: 240, marginBottom: 24 }} />
+        <img src="images/logo.svg" alt="JB Brush Control" style={{ maxWidth:240, marginBottom:24 }} />
         <div className="admin-login-title">Admin Panel</div>
         <div className="admin-login-sub">Sign in to access reports, invoices, and business data.</div>
         {error && <div className="admin-login-error">{error}</div>}
         <form onSubmit={submit}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display:'block', fontSize:13, fontWeight:600, color:'#374151', marginBottom:6 }}>Password</label>
+          <div style={{ marginBottom:14 }}>
+            <label style={{ display:'block', fontSize:13, fontWeight:600, color:'#374151', marginBottom:6 }}>Your Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Larissa"
+              autoFocus
+              autoCapitalize="words"
+              style={{ width:'100%', padding:'10px 14px', border:'2px solid #d1d5db', borderRadius:8, fontSize:15, fontFamily:'inherit' }}
+            />
+          </div>
+          <div style={{ marginBottom:20 }}>
+            <label style={{ display:'block', fontSize:13, fontWeight:600, color:'#374151', marginBottom:6 }}>PIN</label>
             <input
               type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Enter admin password"
-              autoFocus
+              value={pin}
+              onChange={e => setPin(e.target.value)}
+              placeholder="Enter your PIN"
               style={{ width:'100%', padding:'10px 14px', border:'2px solid #d1d5db', borderRadius:8, fontSize:15, fontFamily:'inherit' }}
             />
           </div>
