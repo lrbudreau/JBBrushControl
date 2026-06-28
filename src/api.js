@@ -1,7 +1,8 @@
 import { CONFIG } from './config';
 
 export async function api(action, params = {}, body = null) {
-  const token = sessionStorage.getItem('jb_token');
+  // Admin uses localStorage, mobile uses sessionStorage
+  const token = localStorage.getItem('jb_token') || sessionStorage.getItem('jb_token');
   try {
     if (body !== null) {
       const res = await fetch(CONFIG.API_URL, {
@@ -23,31 +24,46 @@ export async function api(action, params = {}, body = null) {
   }
 }
 
+// Mobile session — clears when browser closes
 export function saveSession(token, user) {
   sessionStorage.setItem('jb_token', token);
   sessionStorage.setItem('jb_user', JSON.stringify(user));
+  // Also save to localStorage for admin panel access
+  localStorage.setItem('jb_token', token);
+  localStorage.setItem('jb_user', JSON.stringify(user));
 }
 
 export function clearSession() {
   sessionStorage.removeItem('jb_token');
   sessionStorage.removeItem('jb_user');
-  sessionStorage.removeItem('jb_webauthn');
+  localStorage.removeItem('jb_token');
+  localStorage.removeItem('jb_user');
+  localStorage.removeItem('jb_last_user');
 }
 
 export function getSession() {
   try {
-    const token = sessionStorage.getItem('jb_token');
-    const user  = JSON.parse(sessionStorage.getItem('jb_user'));
+    const token = sessionStorage.getItem('jb_token') || localStorage.getItem('jb_token');
+    const userStr = sessionStorage.getItem('jb_user') || localStorage.getItem('jb_user');
+    const user = JSON.parse(userStr);
     if (token && user) return { token, user };
     return null;
   } catch { return null; }
 }
 
 export function getUser() {
-  try { return JSON.parse(sessionStorage.getItem('jb_user')); } catch { return null; }
+  try {
+    const str = sessionStorage.getItem('jb_user') || localStorage.getItem('jb_user');
+    return JSON.parse(str);
+  } catch { return null; }
 }
 
 export function isOwnerOrAdmin() {
   const u = getUser();
   return u && ['owner', 'admin'].includes(u.Role);
+}
+
+export function isOwner() {
+  const u = getUser();
+  return u && u.Role === 'owner';
 }
