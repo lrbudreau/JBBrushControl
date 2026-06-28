@@ -285,7 +285,7 @@ export default function JobDetail({ jobID, onBack }) {
               <input type="date" style={S.input} value={jobDate} onChange={e => setJobDate(e.target.value)} />
 
               {/* Schedule availability */}
-              <SchedulePreview selectedDate={jobDate} currentJobID={jobID} />
+              <SchedulePreview selectedDate={jobDate} currentJobID={jobID} onSelectDate={setJobDate} />
 
               <div style={{ fontSize:12, color:'#6b7280', marginTop:10 }}>
                 Accepting will schedule this job and mark the estimate as Accepted.
@@ -377,8 +377,13 @@ export default function JobDetail({ jobID, onBack }) {
   );
 }
 
-function SchedulePreview({ selectedDate, currentJobID }) {
-  const [jobs, setJobs] = useState([]);
+function SchedulePreview({ selectedDate, currentJobID, onSelectDate }) {
+  const [jobs, setJobs]       = useState([]);
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = selectedDate ? new Date(selectedDate + 'T00:00:00') : new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+
   useEffect(() => {
     api('getJobs').then(r => {
       if (r.status === 'ok') {
@@ -391,56 +396,119 @@ function SchedulePreview({ selectedDate, currentJobID }) {
     });
   }, [currentJobID]);
 
-  if (!selectedDate) return null;
+  // Build calendar days for current view month
+  const { year, month } = viewMonth;
+  const firstDay  = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today     = new Date().toISOString().split('T')[0];
 
-  // Get jobs for the selected week (Mon-Sun)
-  const sel    = new Date(selectedDate + 'T00:00:00');
-  const day    = sel.getDay(); // 0=Sun
-  const monday = new Date(sel); monday.setDate(sel.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  // Build indexed jobs map
+  const jobsByDate = {};
+  jobs.forEach(j => {
+    if (!jobsByDate[j.JobDate]) jobsByDate[j.JobDate] = [];
+    jobsByDate[j.JobDate].push(j);
+  });
 
-  const weekDays = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday); d.setDate(monday.getDate() + i);
-    const dateStr = d.toISOString().split('T')[0];
-    const dayJobs = jobs.filter(j => j.JobDate === dateStr);
-    weekDays.push({ date: dateStr, dayJobs, label: d.toLocaleDateString('en-US',{weekday:'short',month:'numeric',day:'numeric'}) });
-  }
+  const prevMonth = () => setViewMonth(v => {
+    const d = new Date(v.year, v.month - 1, 1);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const nextMonth = () => setViewMonth(v => {
+    const d = new Date(v.year, v.month + 1, 1);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
 
-  const hasAny = weekDays.some(d => d.dayJobs.length > 0);
+  const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  // Selected date jobs
+  const selJobs = selectedDate ? (jobsByDate[selectedDate] || []) : [];
 
   return (
     <div style={{ marginTop:14 }}>
       <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:8 }}>
-        Week of {monday.toLocaleDateString('en-US',{month:'long',day:'numeric'})}
+        Schedule Availability
       </div>
-      {!hasAny ? (
-        <div style={{ background:'#f0fdf4', borderRadius:8, padding:'10px 12px', fontSize:12, color:'#166534', fontWeight:600 }}>
-          ✅ No other jobs scheduled this week
-        </div>
-      ) : (
-        <div style={{ borderRadius:8, overflow:'hidden', border:'1px solid #e5e7eb' }}>
-          {weekDays.map(({ date, dayJobs, label }) => (
-            <div key={date} style={{
-              display:'flex', alignItems:'flex-start', gap:10, padding:'8px 12px',
-              borderBottom:'1px solid #f3f4f6',
-              background: date === selectedDate ? '#fef3c7' : dayJobs.length > 0 ? '#fff7ed' : 'white',
-            }}>
-              <div style={{ minWidth:80, fontSize:12, fontWeight: date===selectedDate ? 700 : 400, color: date===selectedDate ? '#92400e' : '#374151' }}>
-                {label}{date===selectedDate ? ' ← selected' : ''}
-              </div>
-              <div style={{ flex:1 }}>
-                {dayJobs.length === 0 ? (
-                  <span style={{ fontSize:11, color:'#9ca3af' }}>Open</span>
-                ) : dayJobs.map(j => (
-                  <div key={j.JobID} style={{ fontSize:11, color:'#d97706', fontWeight:600 }}>
-                    🔧 {j.CustomerName} — {j.Description?.slice(0,30)}
-                    {j.Priority==='Urgent' && <span style={{ color:'#dc2626' }}> 🔴</span>}
-                  </div>
-                ))}
-              </div>
+
+      {/* Month nav */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+        <button onClick={prevMonth} style={{ background:'none', border:'1px solid #e5e7eb', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:14 }}>‹</button>
+        <span style={{ fontWeight:700, fontSize:14 }}>{monthName}</span>
+        <button onClick={nextMonth} style={{ background:'none', border:'1px solid #e5e7eb', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:14 }}>›</button>
+      </div>
+
+      {/* Day headers */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:2, marginBottom:2 }}>
+        {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+          <div key={d} style={{ textAlign:'center', fontSize:10, fontWeight:700, color:'#9ca3af', padding:'2px 0' }}>{d}</div>
+        ))}
+      </div>
+
+      {/* Calendar grid */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:2 }}>
+        {/* Empty cells before first day */}
+        {Array(firstDay).fill(null).map((_, i) => <div key={'e'+i} />)}
+        {/* Day cells */}
+        {Array(daysInMonth).fill(null).map((_, i) => {
+          const day     = i + 1;
+          const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          const dayJobs = jobsByDate[dateStr] || [];
+          const isSelected = dateStr === selectedDate;
+          const isToday    = dateStr === today;
+          const isPast     = dateStr < today;
+          const hasUrgent  = dayJobs.some(j => j.Priority === 'Urgent');
+
+          return (
+            <div key={day} onClick={() => !isPast && onSelectDate && onSelectDate(dateStr)}
+              style={{
+                borderRadius:6, padding:'4px 2px', minHeight:34, cursor: isPast ? 'default' : 'pointer',
+                background: isSelected ? '#1a4a1a' : dayJobs.length > 0 ? '#fff3cd' : 'white',
+                border: isToday ? '2px solid #1a4a1a' : '1px solid #e5e7eb',
+                opacity: isPast ? 0.4 : 1,
+                display:'flex', flexDirection:'column', alignItems:'center',
+              }}>
+              <span style={{ fontSize:12, fontWeight: isSelected||isToday ? 700 : 400, color: isSelected ? 'white' : '#111827' }}>{day}</span>
+              {dayJobs.length > 0 && !isSelected && (
+                <span style={{ fontSize:9, background: hasUrgent?'#dc2626':'#d97706', color:'white', borderRadius:99, padding:'1px 4px', marginTop:1, lineHeight:1.4 }}>
+                  {dayJobs.length}{hasUrgent?' 🔴':''}
+                </span>
+              )}
+              {isSelected && dayJobs.length > 0 && (
+                <span style={{ fontSize:9, background:'rgba(255,255,255,0.3)', color:'white', borderRadius:99, padding:'1px 4px', marginTop:1 }}>
+                  {dayJobs.length} booked
+                </span>
+              )}
             </div>
-          ))}
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display:'flex', gap:12, marginTop:8, fontSize:11, color:'#6b7280' }}>
+        <span>🟡 Jobs scheduled</span>
+        <span style={{ color:'#1a4a1a', fontWeight:700 }}>■ Selected date</span>
+        <span>🔴 Urgent</span>
+      </div>
+
+      {/* Jobs on selected date */}
+      {selectedDate && (
+        <div style={{ marginTop:10 }}>
+          {selJobs.length === 0 ? (
+            <div style={{ background:'#f0fdf4', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#166534', fontWeight:600 }}>
+              ✅ Nothing else scheduled on this date
+            </div>
+          ) : (
+            <div style={{ background:'#fff3cd', borderRadius:8, padding:'10px 12px' }}>
+              <div style={{ fontSize:11, fontWeight:700, color:'#92400e', marginBottom:6 }}>
+                ⚠️ {selJobs.length} job{selJobs.length>1?'s':''} already scheduled this day:
+              </div>
+              {selJobs.map(j => (
+                <div key={j.JobID} style={{ fontSize:12, color:'#374151', padding:'3px 0', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+                  🔧 {j.CustomerName} — {j.Description?.slice(0,40)}
+                  {j.Priority==='Urgent' && <span style={{ color:'#dc2626', fontWeight:700 }}> 🔴 URGENT</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
