@@ -1,28 +1,66 @@
 import React, { useEffect, useState } from 'react';
 import { api, getUser } from '../api';
 import { toast } from './Toast';
-import { CONFIG } from '../config';
+
+const HOME_ADDRESS = ''; // Will be pulled from Settings
 
 export default function LogMileage({ onClose }) {
   const user = getUser();
-  const [equipment, setEquip]   = useState([]);
-  const [jobs, setJobs]         = useState([]);
-  const [saving, setSaving]     = useState(false);
-  const [calculating, setCalc]  = useState(false);
-
-  // Mileage entries: each is { equipmentID, pointA, pointB, miles, rounds, totalMiles, jobID, division, purpose }
-  const [date, setDate] = useState(today());
+  const [equipment, setEquip] = useState([]);
+  const [jobs, setJobs]       = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [saving, setSaving]   = useState(false);
+  const [calculating, setCalc] = useState(null);
+  const [homeAddress, setHomeAddress] = useState('');
+  const [date, setDate]       = useState(today());
   const [entries, setEntries] = useState([blankEntry()]);
 
   useEffect(() => {
-    Promise.all([api('getEquipment'), api('getJobs')]).then(([e, j]) => {
-      if (e.status === 'ok') setEquip(e.data.filter(x => ['Truck', 'Trailer'].includes(x.Type)));
+    Promise.all([
+      api('getEquipment'),
+      api('getJobs'),
+      api('getCustomers'),
+    ]).then(([e, j, c]) => {
+      if (e.status === 'ok') setEquip(e.data.filter(x => ['Truck','Trailer'].includes(x.Type)));
       if (j.status === 'ok') setJobs(j.data);
+      if (c.status === 'ok') setCustomers(c.data);
     });
+    // Get home address from settings
+    api('getDashboard').then(() => {}); // just to warm up
   }, []);
 
   function blankEntry() {
-    return { equipmentID: '', pointA: '', pointB: '', miles: '', rounds: 1, totalMiles: '', jobID: '', division: 'Spray', purpose: '', truckName: '' };
+    return {
+      equipmentID: '', truckName: '',
+      pointAType: 'home', pointACustom: '', pointAJobID: '',
+      pointBType: 'job',  pointBCustom: '', pointBJobID: '',
+      miles: '', rounds: 1, totalMiles: '',
+      jobID: '', division: 'Spray', purpose: '',
+    };
+  }
+
+  // Resolve address from type selection
+  function resolveAddress(entry, side) {
+    const type    = side === 'A' ? entry.pointAType    : entry.pointBType;
+    const custom  = side === 'A' ? entry.pointACustom  : entry.pointBCustom;
+    const jobID   = side === 'A' ? entry.pointAJobID   : entry.pointBJobID;
+
+    if (type === 'custom') return custom;
+    if (type === 'home')   return homeAddress || 'home';
+    if (type === 'job') {
+      const job      = jobs.find(j => j.JobID === jobID);
+      const customer = job ? customers.find(c => c.CustomerID === job.CustomerID) : null;
+      if (customer) {
+        return [customer.Address, customer.City, customer.State].filter(Boolean).join(', ');
+      }
+      return '';
+    }
+    return '';
+  }
+
+  function getAddressDisplay(entry, side) {
+    const addr = resolveAddress(entry, side);
+    return addr || '—';
   }
 
   const updateEntry = (i, field, val) => {
@@ -33,91 +71,93 @@ export default function LogMileage({ onClose }) {
         const eq = equipment.find(x => x.EquipmentID === val);
         if (eq) next.truckName = eq.Name;
       }
-      // Recalculate total when miles or rounds changes
+      // Link job to the trip automatically
+      if (field === 'pointBJobID' && next.pointBType === 'job') next.jobID = val;
+      if (field === 'pointAJobID' && next.pointAType === 'job') next.jobID = val;
+      // Recalculate total
       if (field === 'miles' || field === 'rounds') {
-        const m = field === 'miles' ? parseFloat(val) : parseFloat(next.miles);
-        const r = field === 'rounds' ? parseInt(val) : parseInt(next.rounds);
-        if (m && r) next.totalMiles = (m * r).toFixed(1);
+        const m = parseFloat(field === 'miles' ? val : next.miles) || 0;
+        const r = parseInt(field === 'rounds' ? val : next.rounds) || 1;
+        if (m) next.totalMiles = (m * r).toFixed(1);
       }
       return next;
     }));
   };
 
+  // Load Google Maps JS SDK (browser-safe, no CORS issues)
+  const loadMapsSDK = () => new Promise((resolve, reject) => {
+    if (window.google?.maps) { resolve(); return; }
+    const existing = document.getElementById('gmaps-script');
+    if (existing) { existing.onload = resolve; return; }
+    const script = document.createElement('script');
+    script.id  = 'gmaps-script';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs&libraries=geometry`;
+    script.onload  = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+
   const calculateDistance = async (i) => {
     const entry = entries[i];
-    if (!entry.pointA || !entry.pointB) return toast('Enter both Point A and Point B', 'error');
-    setCalc(i);
+    const addrA = resolveAddress(entry, 'A');
+    const addrB = resolveAddress(entry, 'B');
 
-    try {
-      // Use Google Maps Distance Matrix API
-      const origin = encodeURIComponent(entry.pointA + ', Indiana');
-      const dest   = encodeURIComponent(entry.pointB + ', Indiana');
-      const url    = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${dest}&units=imperial&key=${CONFIG.GOOGLE_API_KEY}`;
-
-      // We can't call this directly due to CORS — use a proxy approach via the app
-      // Instead use the Directions API which works from browser
-      const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${dest}&key=${CONFIG.GOOGLE_API_KEY}`;
-
-      const res  = await fetch(directionsUrl);
-      const data = await res.json();
-
-      if (data.status === 'OK' && data.routes?.length > 0) {
-        const meters = data.routes[0].legs[0].distance.value;
-        const miles  = (meters / 1609.344).toFixed(1);
-        updateEntry(i, 'miles', miles);
-        toast(`${miles} miles calculated ✅`);
-      } else {
-        // Fallback: try a simpler geocode approach
-        await calculateDistanceFallback(i, entry);
-      }
-    } catch (e) {
-      await calculateDistanceFallback(i, entry);
+    if (!addrA || !addrB) {
+      return toast('Set both Point A and Point B first', 'error');
     }
-    setCalc(null);
-  };
+    if (addrA === 'home' || addrB === 'home') {
+      return toast('Add HomeAddress to Settings sheet first', 'info');
+    }
 
-  const calculateDistanceFallback = async (i, entry) => {
+    setCalc(i);
     try {
-      // Use Maps Embed / Geocoding as fallback
-      const geocodeA = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(entry.pointA + ', Indiana')}&key=${CONFIG.GOOGLE_API_KEY}`);
-      const dataA    = await geocodeA.json();
-      const geocodeB = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(entry.pointB + ', Indiana')}&key=${CONFIG.GOOGLE_API_KEY}`);
-      const dataB    = await geocodeB.json();
+      await loadMapsSDK();
 
-      if (dataA.status === 'OK' && dataB.status === 'OK') {
-        const locA = dataA.results[0].geometry.location;
-        const locB = dataB.results[0].geometry.location;
-        // Haversine formula for straight-line distance (multiply by 1.25 for road estimate)
-        const R    = 3958.8; // Earth radius in miles
-        const dLat = (locB.lat - locA.lat) * Math.PI / 180;
-        const dLon = (locB.lng - locA.lng) * Math.PI / 180;
-        const a    = Math.sin(dLat/2)**2 + Math.cos(locA.lat*Math.PI/180) * Math.cos(locB.lat*Math.PI/180) * Math.sin(dLon/2)**2;
-        const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        const roadMiles = (dist * 1.25).toFixed(1); // road distance estimate
-        updateEntry(i, 'miles', roadMiles);
-        toast(`~${roadMiles} miles (estimated) ✅`);
-      } else {
-        toast('Could not calculate — enter miles manually', 'info');
-      }
+      const service = new window.google.maps.DistanceMatrixService();
+      service.getDistanceMatrix({
+        origins:      [addrA],
+        destinations: [addrB],
+        travelMode:   window.google.maps.TravelMode.DRIVING,
+        unitSystem:   window.google.maps.UnitSystem.IMPERIAL,
+      }, (response, status) => {
+        if (status === 'OK') {
+          const element = response.rows[0].elements[0];
+          if (element.status === 'OK') {
+            // distance.text is like "12.3 mi" — extract the number
+            const text  = element.distance.text; // e.g. "12.3 mi"
+            const miles = parseFloat(text.replace(/[^0-9.]/g, '')).toFixed(1);
+            updateEntry(i, 'miles', miles);
+            toast(`${miles} miles (${element.duration.text}) ✅`);
+          } else {
+            toast('Could not find route — enter miles manually', 'info');
+          }
+        } else {
+          toast('Maps error — enter miles manually', 'info');
+        }
+        setCalc(null);
+      });
     } catch (e) {
-      toast('Could not calculate — enter miles manually', 'info');
+      toast('Maps failed to load — enter miles manually', 'info');
+      setCalc(null);
     }
   };
 
   const openInMaps = (i) => {
     const entry = entries[i];
-    if (!entry.pointA || !entry.pointB) return;
-    const url = `https://www.google.com/maps/dir/${encodeURIComponent(entry.pointA + ', Indiana')}/${encodeURIComponent(entry.pointB + ', Indiana')}`;
-    window.open(url, '_blank');
+    const addrA = resolveAddress(entry, 'A');
+    const addrB = resolveAddress(entry, 'B');
+    if (!addrA || !addrB) return toast('Set both points first', 'info');
+    window.open(`https://www.google.com/maps/dir/${encodeURIComponent(addrA)}/${encodeURIComponent(addrB)}`, '_blank');
   };
 
   const save = async () => {
     const valid = entries.filter(e => e.equipmentID && (e.totalMiles || e.miles));
-    if (valid.length === 0) return toast('Select a truck and enter mileage for at least one entry', 'error');
-
+    if (valid.length === 0) return toast('Select a truck and enter or calculate mileage', 'error');
     setSaving(true);
     let count = 0;
     for (const entry of valid) {
+      const addrA = resolveAddress(entry, 'A');
+      const addrB = resolveAddress(entry, 'B');
       const miles = parseFloat(entry.totalMiles || entry.miles) || 0;
       const r = await api('addMileage', {}, {
         Date:        date,
@@ -127,16 +167,16 @@ export default function LogMileage({ onClose }) {
         StartMiles:  0,
         EndMiles:    0,
         TotalMiles:  miles,
-        Purpose:     entry.purpose || (entry.pointA && entry.pointB ? `${entry.pointA} → ${entry.pointB}` : ''),
+        Purpose:     entry.purpose || (addrA && addrB ? `${addrA} → ${addrB}` : ''),
         Division:    entry.division,
-        PointA:      entry.pointA || '',
-        PointB:      entry.pointB || '',
+        PointA:      addrA,
+        PointB:      addrB,
         Rounds:      parseInt(entry.rounds) || 1,
       });
       if (r.status === 'ok') count++;
     }
     if (count > 0) { toast(`${count} mileage entr${count > 1 ? 'ies' : 'y'} logged ✅`); onClose(); }
-    else toast('Failed to save mileage', 'error');
+    else toast('Failed to save', 'error');
     setSaving(false);
   };
 
@@ -157,71 +197,84 @@ export default function LogMileage({ onClose }) {
 
           {entries.map((entry, i) => (
             <div key={i} style={S.entryCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: '#1a4a1a' }}>Trip {i + 1}</div>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:'#1a4a1a' }}>Trip {i+1}</div>
                 {entries.length > 1 && (
-                  <button onClick={() => setEntries(e => e.filter((_, idx) => idx !== i))} style={S.removeBtn}>Remove</button>
+                  <button onClick={() => setEntries(e => e.filter((_,idx) => idx !== i))} style={S.removeBtn}>Remove</button>
                 )}
               </div>
 
+              {/* Truck */}
               <div style={S.label}>Truck *</div>
-              <select style={S.input} value={entry.equipmentID} onChange={e => updateEntry(i, 'equipmentID', e.target.value)}>
+              <select style={S.input} value={entry.equipmentID} onChange={e => updateEntry(i,'equipmentID',e.target.value)}>
                 <option value="">— Select truck —</option>
                 {equipment.map(e => <option key={e.EquipmentID} value={e.EquipmentID}>{e.Name}</option>)}
               </select>
 
+              {/* Division */}
               <div style={S.label}>Division</div>
-              <select style={S.input} value={entry.division} onChange={e => updateEntry(i, 'division', e.target.value)}>
+              <select style={S.input} value={entry.division} onChange={e => updateEntry(i,'division',e.target.value)}>
                 <option>Spray</option><option>Tree</option>
               </select>
 
-              {/* Point A to B */}
-              <div style={S.label}>Point A (from)</div>
-              <input style={S.input} placeholder="e.g. 403 N Monroe Ave, Fowler" value={entry.pointA}
-                onChange={e => updateEntry(i, 'pointA', e.target.value)} />
+              {/* Point A */}
+              <div style={S.label}>From (Point A)</div>
+              <PointSelector
+                typeVal={entry.pointAType}
+                jobVal={entry.pointAJobID}
+                customVal={entry.pointACustom}
+                jobs={jobs}
+                display={getAddressDisplay(entry, 'A')}
+                onTypeChange={v => updateEntry(i,'pointAType',v)}
+                onJobChange={v => updateEntry(i,'pointAJobID',v)}
+                onCustomChange={v => updateEntry(i,'pointACustom',v)}
+              />
 
-              <div style={S.label}>Point B (to)</div>
-              <input style={S.input} placeholder="e.g. Job site, home, dump" value={entry.pointB}
-                onChange={e => updateEntry(i, 'pointB', e.target.value)} />
+              {/* Point B */}
+              <div style={S.label}>To (Point B)</div>
+              <PointSelector
+                typeVal={entry.pointBType}
+                jobVal={entry.pointBJobID}
+                customVal={entry.pointBCustom}
+                jobs={jobs}
+                display={getAddressDisplay(entry, 'B')}
+                onTypeChange={v => updateEntry(i,'pointBType',v)}
+                onJobChange={v => updateEntry(i,'pointBJobID',v)}
+                onCustomChange={v => updateEntry(i,'pointBCustom',v)}
+              />
 
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button style={S.calcBtn} onClick={() => calculateDistance(i)} disabled={calculating === i}>
-                  {calculating === i ? '…' : '📍 Calculate'}
+              {/* Calculate buttons */}
+              <div style={{ display:'flex', gap:8, marginTop:10 }}>
+                <button style={S.calcBtn} onClick={() => calculateDistance(i)} disabled={calculating===i}>
+                  {calculating===i ? '…' : '📍 Calc miles'}
                 </button>
-                <button style={S.mapsBtn} onClick={() => openInMaps(i)}>
-                  🗺 Open in Maps
-                </button>
+                <button style={S.mapsBtn} onClick={() => openInMaps(i)}>🗺 Maps</button>
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <div style={{ flex: 1 }}>
+              {/* Miles + Rounds */}
+              <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                <div style={{ flex:1 }}>
                   <div style={S.label}>One-way miles</div>
                   <input style={S.input} type="number" inputMode="decimal" placeholder="0.0"
-                    value={entry.miles} onChange={e => updateEntry(i, 'miles', e.target.value)} />
+                    value={entry.miles} onChange={e => updateEntry(i,'miles',e.target.value)} />
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={S.label}>Rounds (trips)</div>
+                <div style={{ flex:1 }}>
+                  <div style={S.label}>Rounds</div>
                   <input style={S.input} type="number" inputMode="numeric" min="1" placeholder="1"
-                    value={entry.rounds} onChange={e => updateEntry(i, 'rounds', e.target.value)} />
+                    value={entry.rounds} onChange={e => updateEntry(i,'rounds',e.target.value)} />
                 </div>
               </div>
 
-              {/* Total for this entry */}
-              {(entry.miles || entry.totalMiles) && (
+              {/* Entry total */}
+              {(entry.miles || entry.totalMiles) && entry.rounds > 1 && (
                 <div style={S.entryTotal}>
-                  {entry.miles} mi × {entry.rounds} round{entry.rounds > 1 ? 's' : ''} = <strong>{entry.totalMiles || entry.miles} miles</strong>
+                  {entry.miles} mi × {entry.rounds} rounds = <strong>{entry.totalMiles} mi</strong>
                 </div>
               )}
 
-              <div style={S.label}>Job (optional)</div>
-              <select style={S.input} value={entry.jobID} onChange={e => updateEntry(i, 'jobID', e.target.value)}>
-                <option value="">—</option>
-                {jobs.map(j => <option key={j.JobID} value={j.JobID}>{j.CustomerName} — {j.Description?.slice(0, 30)}</option>)}
-              </select>
-
-              <div style={S.label}>Purpose / Notes</div>
-              <input style={S.input} placeholder="e.g. Dumping brush, supply run" value={entry.purpose}
-                onChange={e => updateEntry(i, 'purpose', e.target.value)} />
+              <div style={S.label}>Notes</div>
+              <input style={S.input} placeholder="e.g. Dumping brush at shop" value={entry.purpose}
+                onChange={e => updateEntry(i,'purpose',e.target.value)} />
             </div>
           ))}
 
@@ -231,8 +284,8 @@ export default function LogMileage({ onClose }) {
 
           {grandTotal > 0 && (
             <div style={S.grandTotal}>
-              Total miles today: <strong>{grandTotal.toFixed(1)}</strong>
-              <div style={{ fontSize: 12, color: '#4a9e4a', marginTop: 2 }}>
+              <div style={{ fontWeight:700, fontSize:16 }}>Total: {grandTotal.toFixed(1)} miles</div>
+              <div style={{ fontSize:12, color:'#4a9e4a', marginTop:2 }}>
                 IRS deduction: ${(grandTotal * 0.67).toFixed(2)}
               </div>
             </div>
@@ -250,25 +303,80 @@ export default function LogMileage({ onClose }) {
   );
 }
 
+// ── Point selector component ──────────────────────────────────
+function PointSelector({ typeVal, jobVal, customVal, jobs, display, onTypeChange, onJobChange, onCustomChange }) {
+  return (
+    <div>
+      {/* Type toggle buttons */}
+      <div style={{ display:'flex', gap:6, marginBottom:8 }}>
+        {[
+          { val:'home',   label:'🏠 Home' },
+          { val:'job',    label:'📍 Job site' },
+          { val:'custom', label:'✏️ Type address' },
+        ].map(opt => (
+          <button key={opt.val}
+            style={{
+              flex:1, padding:'7px 4px', borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer',
+              border: typeVal===opt.val ? '2px solid #1a4a1a' : '2px solid #d1d5db',
+              background: typeVal===opt.val ? '#e8f5e8' : 'white',
+              color: typeVal===opt.val ? '#1a4a1a' : '#6b7280',
+            }}
+            onClick={() => onTypeChange(opt.val)}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Job selector */}
+      {typeVal === 'job' && (
+        <select style={PS.input} value={jobVal} onChange={e => onJobChange(e.target.value)}>
+          <option value="">— Select job —</option>
+          {jobs.map(j => (
+            <option key={j.JobID} value={j.JobID}>
+              {j.CustomerName} — {j.Description?.slice(0,35)}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* Custom address */}
+      {typeVal === 'custom' && (
+        <input style={PS.input} placeholder="Enter address…" value={customVal} onChange={e => onCustomChange(e.target.value)} />
+      )}
+
+      {/* Address preview */}
+      {typeVal !== 'custom' && display && display !== '—' && (
+        <div style={PS.preview}>{display}</div>
+      )}
+    </div>
+  );
+}
+
+const PS = {
+  input:   { width:'100%', minHeight:46, padding:'10px 12px', border:'2px solid #d1d5db', borderRadius:8, fontSize:15, fontFamily:'inherit', background:'white' },
+  preview: { fontSize:12, color:'#6b7280', padding:'6px 10px', background:'#f3f4f6', borderRadius:6, marginTop:4 },
+};
+
 function today() { return new Date().toISOString().split('T')[0]; }
 
 const S = {
-  overlay:    { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300, display: 'flex', alignItems: 'flex-end' },
-  sheet:      { background: 'white', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 480, margin: '0 auto', maxHeight: '94vh', display: 'flex', flexDirection: 'column', animation: 'slideUp 0.25s ease' },
-  handle:     { width: 40, height: 4, background: '#d1d5db', borderRadius: 99, margin: '10px auto 0', flexShrink: 0 },
-  header:     { padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', flexShrink: 0 },
-  closeBtn:   { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' },
-  body:       { padding: '14px 18px', overflowY: 'auto', flex: 1 },
-  footer:     { padding: '12px 18px 24px', display: 'flex', gap: 10, borderTop: '1px solid #f3f4f6', flexShrink: 0 },
-  label:      { fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, marginTop: 10 },
-  input:      { width: '100%', minHeight: 46, padding: '10px 12px', border: '2px solid #d1d5db', borderRadius: 8, fontSize: 15, fontFamily: 'inherit', background: 'white' },
-  entryCard:  { background: '#f9fafb', borderRadius: 10, padding: '12px 14px', marginBottom: 10, border: '1px solid #e5e7eb' },
-  removeBtn:  { background: 'none', border: 'none', color: '#dc2626', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  calcBtn:    { flex: 1, padding: '9px 12px', borderRadius: 8, border: 'none', background: '#1a4a1a', color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer' },
-  mapsBtn:    { flex: 1, padding: '9px 12px', borderRadius: 8, border: '2px solid #d1d5db', background: 'white', color: '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' },
-  entryTotal: { background: '#e8f5e8', borderRadius: 6, padding: '8px 12px', marginTop: 8, fontSize: 13, color: '#1a4a1a', textAlign: 'center' },
-  addBtn:     { display: 'block', width: '100%', padding: 11, border: '2px dashed #2d6a2d', borderRadius: 8, background: 'transparent', color: '#2d6a2d', fontSize: 14, fontWeight: 600, cursor: 'pointer', marginTop: 4 },
-  grandTotal: { background: '#e8f5e8', borderRadius: 8, padding: '12px 14px', marginTop: 12, textAlign: 'center', fontSize: 15, color: '#1a4a1a' },
-  cancelBtn:  { flex: 1, padding: 12, borderRadius: 8, border: '2px solid #d1d5db', background: 'white', color: '#374151', fontWeight: 600, cursor: 'pointer', fontSize: 14 },
-  saveBtn:    { flex: 2, padding: 12, borderRadius: 8, border: 'none', background: '#1a4a1a', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 },
+  overlay:    { position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:300, display:'flex', alignItems:'flex-end' },
+  sheet:      { background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:480, margin:'0 auto', maxHeight:'94vh', display:'flex', flexDirection:'column', animation:'slideUp 0.25s ease' },
+  handle:     { width:40, height:4, background:'#d1d5db', borderRadius:99, margin:'10px auto 0', flexShrink:0 },
+  header:     { padding:'12px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid #f3f4f6', flexShrink:0 },
+  closeBtn:   { background:'none', border:'none', fontSize:20, cursor:'pointer', color:'#6b7280' },
+  body:       { padding:'14px 18px', overflowY:'auto', flex:1 },
+  footer:     { padding:'12px 18px 24px', display:'flex', gap:10, borderTop:'1px solid #f3f4f6', flexShrink:0 },
+  label:      { fontSize:12, fontWeight:600, color:'#374151', marginBottom:4, marginTop:10 },
+  input:      { width:'100%', minHeight:46, padding:'10px 12px', border:'2px solid #d1d5db', borderRadius:8, fontSize:15, fontFamily:'inherit', background:'white' },
+  entryCard:  { background:'#f9fafb', borderRadius:10, padding:'12px 14px', marginBottom:10, border:'1px solid #e5e7eb' },
+  removeBtn:  { background:'none', border:'none', color:'#dc2626', fontSize:12, fontWeight:600, cursor:'pointer' },
+  calcBtn:    { flex:2, padding:'9px 12px', borderRadius:8, border:'none', background:'#1a4a1a', color:'white', fontWeight:600, fontSize:13, cursor:'pointer' },
+  mapsBtn:    { flex:1, padding:'9px 12px', borderRadius:8, border:'2px solid #d1d5db', background:'white', color:'#374151', fontWeight:600, fontSize:13, cursor:'pointer' },
+  entryTotal: { background:'#e8f5e8', borderRadius:6, padding:'8px 12px', marginTop:8, fontSize:13, color:'#1a4a1a', textAlign:'center' },
+  addBtn:     { display:'block', width:'100%', padding:11, border:'2px dashed #2d6a2d', borderRadius:8, background:'transparent', color:'#2d6a2d', fontSize:14, fontWeight:600, cursor:'pointer', marginTop:4 },
+  grandTotal: { background:'#e8f5e8', borderRadius:8, padding:'12px 14px', marginTop:12, textAlign:'center', color:'#1a4a1a' },
+  cancelBtn:  { flex:1, padding:12, borderRadius:8, border:'2px solid #d1d5db', background:'white', color:'#374151', fontWeight:600, cursor:'pointer', fontSize:14 },
+  saveBtn:    { flex:2, padding:12, borderRadius:8, border:'none', background:'#1a4a1a', color:'white', fontWeight:700, cursor:'pointer', fontSize:14 },
 };
