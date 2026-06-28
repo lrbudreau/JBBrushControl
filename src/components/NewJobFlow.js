@@ -96,7 +96,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
       const jobRes = await api('addJob', {}, {
         CustomerID: customerID, Division: customer.Division,
         Description: job.Description, JobDate: job.JobDate,
-        Status: 'Scheduled', Notes: job.Notes,
+        Status: 'Estimate', Notes: job.Notes,
       });
       if (jobRes.status !== 'ok') { toast('Failed to save job', 'error'); setSaving(false); return; }
       const jobID = jobRes.data.JobID;
