@@ -65,9 +65,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
   const updateItem = (i, field, val) => {
     setLineItems(items => items.map((item, idx) => {
       if (idx !== i) return item;
-      const next = { ...item, [field]: val };
-      next.amount = ((parseFloat(next.qty)||0) * (parseFloat(next.rate)||0)).toFixed(2);
-      return next;
+      return { ...item, [field]: val };
     }));
   };
 
@@ -271,8 +269,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
             <div style={S.label}>Description *</div>
             <textarea style={{ ...S.input, minHeight:100, resize:'vertical' }} name="Description"
               value={job.Description} onChange={fj} placeholder="Describe the work to be done…" />
-            <div style={S.label}>Job date</div>
-            <input type="date" style={S.input} name="JobDate" value={job.JobDate} onChange={fj} />
+
             <div style={S.label}>Notes</div>
             <textarea style={{ ...S.input, minHeight:72, resize:'vertical' }} name="Notes" value={job.Notes} onChange={fj} placeholder="Any additional notes…" />
           </div>
@@ -284,18 +281,16 @@ export default function NewJobFlow({ onComplete, onCancel }) {
             <div style={S.stepTitle}>💰 Estimate</div>
             <div style={S.stepSub}>Add line items. You can skip this and add it later.</div>
             {lineItems.map((item, i) => (
-              <div key={i} style={{ marginBottom:10 }}>
-                <input style={{ ...S.input, marginBottom:6 }} placeholder="Description (e.g. Remove oak tree)"
+              <div key={i} style={{ display:'flex', gap:8, marginBottom:10, alignItems:'center' }}>
+                <input style={{ ...S.input, flex:3 }} placeholder="Description (e.g. Remove oak tree)"
                   value={item.description} onChange={e => updateItem(i,'description',e.target.value)} />
-                <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                  <input style={{ ...S.input, flex:1 }} placeholder="Qty" type="number"
-                    value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} inputMode="numeric" />
-                  <input style={{ ...S.input, flex:1 }} placeholder="Rate $" type="number"
-                    value={item.rate} onChange={e => updateItem(i,'rate',e.target.value)} inputMode="decimal" />
-                  <div style={{ fontWeight:700, color:'#1a4a1a', minWidth:60, textAlign:'right' }}>${parseFloat(item.amount||0).toFixed(2)}</div>
-                  <button onClick={() => setLineItems(items => items.filter((_,idx)=>idx!==i))}
-                    style={{ background:'none', border:'none', color:'#dc2626', fontSize:22, cursor:'pointer', padding:'0 4px' }}>×</button>
+                <div style={{ position:'relative', flex:1 }}>
+                  <span style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'#6b7280', pointerEvents:'none' }}>$</span>
+                  <input style={{ ...S.input, paddingLeft:22 }} placeholder="0.00" type="number"
+                    value={item.amount} onChange={e => updateItem(i,'amount',e.target.value)} inputMode="decimal" />
                 </div>
+                <button onClick={() => setLineItems(items => items.filter((_,idx)=>idx!==i))}
+                  style={{ background:'none', border:'none', color:'#dc2626', fontSize:22, cursor:'pointer', padding:'0 4px', flexShrink:0 }}>×</button>
               </div>
             ))}
             <button style={S.addLineBtn} onClick={() => setLineItems(i => [...i, { description:'', qty:1, rate:'', amount:'' }])}>
