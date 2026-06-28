@@ -10,10 +10,15 @@ let _tokenExpiry = null;
 function getServiceAccountKey() {
   try {
     const raw = process.env.REACT_APP_GOOGLE_SA_KEY;
-    if (!raw) throw new Error('Service account key not found');
-    return JSON.parse(raw);
+    if (!raw) {
+      console.error('❌ REACT_APP_GOOGLE_SA_KEY is not set — check GitHub Secrets and deploy.yml');
+      return null;
+    }
+    const key = JSON.parse(raw);
+    console.log('✅ Service account key loaded for:', key.client_email);
+    return key;
   } catch (e) {
-    console.error('Service account key error:', e);
+    console.error('❌ Service account key parse error:', e);
     return null;
   }
 }
@@ -62,10 +67,14 @@ async function generateJWT(key) {
 
 // ── Get access token ─────────────────────────────────────────
 async function getAccessToken() {
-  if (_token && _tokenExpiry && Date.now() < _tokenExpiry) return _token;
+  if (_token && _tokenExpiry && Date.now() < _tokenExpiry) {
+    console.log('✅ Using cached Drive access token');
+    return _token;
+  }
 
   const key = getServiceAccountKey();
-  if (!key) throw new Error('No service account key configured');
+  if (!key) throw new Error('No service account key configured — check REACT_APP_GOOGLE_SA_KEY in GitHub Secrets');
+  console.log('🔄 Requesting new Drive access token...');
 
   const jwt = await generateJWT(key);
 
@@ -135,6 +144,7 @@ export async function getJobFolder(jobID, customerName) {
 
 // ── Upload photo ──────────────────────────────────────────────
 export async function uploadPhoto(file, folderId) {
+  console.log('📸 Uploading photo:', file.name, 'to folder:', folderId);
   const token    = await getAccessToken();
   const metadata = {
     name:    file.name || `photo_${Date.now()}.jpg`,
