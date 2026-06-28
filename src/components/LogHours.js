@@ -1,121 +1,164 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, getUser, isOwnerOrAdmin } from '../api';
 import { toast } from './Toast';
-import NewJobFlow from './NewJobFlow';
-import NewEstimate from './NewEstimate';
-import LogHours from './LogHours';
-import LogMileage from './LogMileage';
 
-export default function MobileHome({ onNavigate, onLogout }) {
-  const user    = getUser();
-  const isAdmin = isOwnerOrAdmin();
-  const [todayJobs, setTodayJobs]   = useState([]);
-  const [showNewJob, setShowNewJob]  = useState(false);
-  const [showEstimate, setShowEst]   = useState(false);
-  const [showHours, setShowHours]    = useState(false);
-  const [showMileage, setShowMileage] = useState(false);
+export default function LogHours({ onClose }) {
+  const user     = getUser();
+  const isAdmin  = isOwnerOrAdmin();
+  const [jobs, setJobs]       = useState([]);
+  const [users, setUsers]     = useState([]);
+  const [saving, setSaving]   = useState(false);
+  const [date, setDate]       = useState(today());
+
+  // Hours entries: each is { jobID, employeeID, hours, notes }
+  const [entries, setEntries] = useState([
+    { jobID: '', employeeID: user?.UserID || '', hours: '', notes: '' }
+  ]);
 
   useEffect(() => {
-    const t = new Date().toISOString().split('T')[0];
-    api('getJobs', { status: 'Scheduled' }).then(r => {
-      if (r.status === 'ok') setTodayJobs(r.data.filter(j => j.JobDate === t));
-    });
+    api('getJobs').then(r => { if (r.status === 'ok') setJobs(r.data); });
+    if (isAdmin) {
+      api('getUsers').then(r => { if (r.status === 'ok') setUsers(r.data.filter(u => u.Active === true || String(u.Active).toUpperCase() === 'TRUE')); });
+    }
   }, []);
 
-  if (showNewJob)   return <NewJobFlow onComplete={() => { setShowNewJob(false); toast('Job created! ✅'); }} onCancel={() => setShowNewJob(false)} />;
-  if (showEstimate) return <NewEstimate onComplete={() => { setShowEst(false); toast('Estimate created! ✅'); }} onCancel={() => setShowEst(false)} />;
+  const updateEntry = (i, field, val) => {
+    setEntries(entries => entries.map((e, idx) => idx !== i ? e : { ...e, [field]: val }));
+  };
+
+  const save = async () => {
+    const valid = entries.filter(e => e.hours && parseFloat(e.hours) > 0);
+    if (valid.length === 0) return toast('Enter hours for at least one entry', 'error');
+
+    setSaving(true);
+    let successCount = 0;
+    for (const entry of valid) {
+      // Convert hours to clock in/out times based on the date
+      const clockIn  = new Date(`${date}T08:00:00`).toISOString();
+      const clockOut = new Date(`${date}T08:00:00`);
+      clockOut.setHours(clockOut.getHours() + Math.floor(parseFloat(entry.hours)));
+      clockOut.setMinutes(clockOut.getMinutes() + Math.round((parseFloat(entry.hours) % 1) * 60));
+
+      const r = await api('addHoursEntry', {}, {
+        EmployeeID:  entry.employeeID || user.UserID,
+        ClockIn:     clockIn,
+        ClockOut:    clockOut.toISOString(),
+        TotalHours:  parseFloat(entry.hours),
+        JobID:       entry.jobID || '',
+        Date:        date,
+        Notes:       entry.notes || '',
+      });
+      if (r.status === 'ok') successCount++;
+    }
+
+    if (successCount > 0) {
+      toast(`${successCount} hour entr${successCount > 1 ? 'ies' : 'y'} logged ✅`);
+      onClose();
+    } else {
+      toast('Failed to save hours', 'error');
+    }
+    setSaving(false);
+  };
 
   return (
-    <div style={S.wrap}>
-      {/* Header */}
-      <div style={S.header}>
-        <img src="images/logo.svg" alt="JB Brush Control" style={{ height: 36, filter: 'invert(1)' }} />
-        <button style={S.logoutBtn} onClick={onLogout}>Sign out</button>
-      </div>
-
-      {/* Greeting */}
-      <div style={S.greeting}>
-        {getGreeting()}, <strong>{user?.Name}</strong>
-        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+    <div style={S.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={S.sheet}>
+        <div style={S.handle} />
+        <div style={S.header}>
+          <h3 style={{ fontSize: 17, fontWeight: 700 }}>Log Hours</h3>
+          <button style={S.closeBtn} onClick={onClose}>✕</button>
         </div>
-      </div>
+        <div style={S.body}>
+          <div style={S.label}>Date</div>
+          <input type="date" style={S.input} value={date} onChange={e => setDate(e.target.value)} />
 
-      {/* Today's jobs strip */}
-      {todayJobs.length > 0 && (
-        <div style={S.todayStrip}>
-          <div style={S.todayLabel}>Today's jobs</div>
-          {todayJobs.map(j => (
-            <div key={j.JobID} style={S.jobPill}>
-              <span style={{ fontWeight: 700 }}>{j.CustomerName}</span>
-              <span style={{ fontSize: 12, color: '#6b7280' }}> · {j.Description?.slice(0, 35)}</span>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#1a4a1a', margin: '14px 0 8px' }}>
+            Hours by job
+          </div>
+
+          {entries.map((entry, i) => (
+            <div key={i} style={S.entryCard}>
+              {/* Employee selector (admin/owner only) */}
+              {isAdmin && (
+                <>
+                  <div style={S.label}>Employee</div>
+                  <select style={S.input} value={entry.employeeID} onChange={e => updateEntry(i, 'employeeID', e.target.value)}>
+                    <option value={user.UserID}>{user.Name} (me)</option>
+                    {users.filter(u => u.UserID !== user.UserID).map(u => (
+                      <option key={u.UserID} value={u.UserID}>{u.Name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              <div style={S.label}>Job (optional)</div>
+              <select style={S.input} value={entry.jobID} onChange={e => updateEntry(i, 'jobID', e.target.value)}>
+                <option value="">— No specific job —</option>
+                {jobs.map(j => (
+                  <option key={j.JobID} value={j.JobID}>
+                    {j.CustomerName} — {j.Description?.slice(0, 35)}
+                  </option>
+                ))}
+              </select>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={S.label}>Hours worked</div>
+                  <input style={S.input} type="number" inputMode="decimal" step="0.25"
+                    placeholder="e.g. 8 or 7.5"
+                    value={entry.hours} onChange={e => updateEntry(i, 'hours', e.target.value)} />
+                </div>
+                <div style={{ flex: 2 }}>
+                  <div style={S.label}>Notes</div>
+                  <input style={S.input} placeholder="What was done…"
+                    value={entry.notes} onChange={e => updateEntry(i, 'notes', e.target.value)} />
+                </div>
+                {entries.length > 1 && (
+                  <button onClick={() => setEntries(e => e.filter((_, idx) => idx !== i))}
+                    style={{ ...S.closeBtn, alignSelf: 'flex-end', marginBottom: 2 }}>×</button>
+                )}
+              </div>
             </div>
           ))}
+
+          <button style={S.addBtn} onClick={() => setEntries(e => [...e, { jobID: '', employeeID: user?.UserID || '', hours: '', notes: '' }])}>
+            + Add another job entry
+          </button>
+
+          {/* Total */}
+          {entries.some(e => e.hours) && (
+            <div style={S.total}>
+              Total: <strong>{entries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0).toFixed(1)} hrs</strong>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Big action buttons */}
-      <div style={S.grid}>
-        <button style={{ ...S.bigBtn, background: '#1a4a1a' }} onClick={() => setShowNewJob(true)}>
-          <span style={S.icon}>📋</span>
-          <span style={S.btnLabel}>New Job</span>
-          <span style={S.btnSub}>Create job + estimate</span>
-        </button>
-
-        <button style={{ ...S.bigBtn, background: '#2d6a2d' }} onClick={() => setShowMileage(true)}>
-          <span style={S.icon}>🚛</span>
-          <span style={S.btnLabel}>Log Mileage</span>
-          <span style={S.btnSub}>Point A → B + rounds</span>
-        </button>
-
-        <button style={{ ...S.bigBtn, background: '#1d6fa4' }} onClick={() => setShowHours(true)}>
-          <span style={S.icon}>⏱</span>
-          <span style={S.btnLabel}>Log Hours</span>
-          <span style={S.btnSub}>Track time by job</span>
-        </button>
-
-        <button style={{ ...S.bigBtn, background: '#d97706' }} onClick={() => onNavigate('jobs')}>
-          <span style={S.icon}>📅</span>
-          <span style={S.btnLabel}>My Jobs</span>
-          <span style={S.btnSub}>View & manage jobs</span>
-        </button>
+        <div style={S.footer}>
+          <button style={S.cancelBtn} onClick={onClose}>Cancel</button>
+          <button style={S.saveBtn} onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Hours'}
+          </button>
+        </div>
       </div>
-
-      {/* Admin quick actions */}
-      {isAdmin && (
-        <div style={S.adminRow}>
-          <button style={S.adminBtn} onClick={() => setShowEst(true)}>📋 New Estimate</button>
-          <button style={S.adminBtn} onClick={() => onNavigate('expenses')}>💸 Log Expense</button>
-        </div>
-      )}
-
-      {/* Modals */}
-      {showHours   && <LogHours   onClose={() => setShowHours(false)} />}
-      {showMileage && <LogMileage onClose={() => setShowMileage(false)} />}
     </div>
   );
 }
 
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return '☀️ Good morning';
-  if (h < 17) return '🌤 Good afternoon';
-  return '🌙 Good evening';
-}
+function today() { return new Date().toISOString().split('T')[0]; }
 
 const S = {
-  wrap:       { display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#f0f4f0', maxWidth: 480, margin: '0 auto' },
-  header:     { background: '#1a4a1a', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  logoutBtn:  { background: 'rgba(255,255,255,0.15)', border: 'none', color: 'white', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' },
-  greeting:   { padding: '14px 16px 8px', fontSize: 17, fontWeight: 700, color: '#1a4a1a' },
-  todayStrip: { margin: '0 16px 8px', background: 'white', borderRadius: 10, padding: '10px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' },
-  todayLabel: { fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 },
-  jobPill:    { padding: '4px 0', fontSize: 13, borderBottom: '1px solid #f3f4f6' },
-  grid:       { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '8px 16px 12px', flex: 1 },
-  bigBtn:     { border: 'none', borderRadius: 14, padding: '20px 14px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, color: 'white', WebkitTapHighlightColor: 'transparent' },
-  icon:       { fontSize: 28 },
-  btnLabel:   { fontSize: 15, fontWeight: 800, lineHeight: 1 },
-  btnSub:     { fontSize: 11, opacity: 0.75, lineHeight: 1.3 },
-  adminRow:   { display: 'flex', gap: 10, padding: '0 16px 20px' },
-  adminBtn:   { flex: 1, padding: '12px 8px', borderRadius: 10, border: '2px solid #d1d5db', background: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#374151' },
+  overlay:    { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300, display: 'flex', alignItems: 'flex-end' },
+  sheet:      { background: 'white', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 480, margin: '0 auto', maxHeight: '92vh', display: 'flex', flexDirection: 'column', animation: 'slideUp 0.25s ease' },
+  handle:     { width: 40, height: 4, background: '#d1d5db', borderRadius: 99, margin: '10px auto 0', flexShrink: 0 },
+  header:     { padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', flexShrink: 0 },
+  closeBtn:   { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' },
+  body:       { padding: '14px 18px', overflowY: 'auto', flex: 1 },
+  footer:     { padding: '12px 18px 24px', display: 'flex', gap: 10, borderTop: '1px solid #f3f4f6', flexShrink: 0 },
+  label:      { fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, marginTop: 8 },
+  input:      { width: '100%', minHeight: 46, padding: '10px 12px', border: '2px solid #d1d5db', borderRadius: 8, fontSize: 15, fontFamily: 'inherit', background: 'white' },
+  entryCard:  { background: '#f9fafb', borderRadius: 10, padding: '12px 14px', marginBottom: 10, border: '1px solid #e5e7eb' },
+  addBtn:     { display: 'block', width: '100%', padding: 11, border: '2px dashed #2d6a2d', borderRadius: 8, background: 'transparent', color: '#2d6a2d', fontSize: 14, fontWeight: 600, cursor: 'pointer', marginTop: 4 },
+  total:      { background: '#e8f5e8', borderRadius: 8, padding: '10px 14px', marginTop: 12, fontSize: 14, color: '#1a4a1a', textAlign: 'center' },
+  cancelBtn:  { flex: 1, padding: 12, borderRadius: 8, border: '2px solid #d1d5db', background: 'white', color: '#374151', fontWeight: 600, cursor: 'pointer', fontSize: 14 },
+  saveBtn:    { flex: 2, padding: 12, borderRadius: 8, border: 'none', background: '#1a4a1a', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 },
 };
