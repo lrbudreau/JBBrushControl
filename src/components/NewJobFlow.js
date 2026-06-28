@@ -103,6 +103,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
       const jobID = jobRes.data.JobID;
 
       // 3. Upload photos to Drive and log to Photos sheet
+      console.log('Photos to upload:', photos.length, photos.map(p => p.file?.name));
       if (photos.length > 0) {
         setUploading(true);
         try {
@@ -134,10 +135,11 @@ export default function NewJobFlow({ onComplete, onCancel }) {
           await Promise.race([drivePromise, timeout]);
           toast(`${photos.length} photo(s) uploaded ✅`);
         } catch (e) {
+          console.error('Photo upload error:', e);
           if (e.message === 'timeout') {
             toast('Photos timed out — job saved, try uploading photos again', 'info');
           } else {
-            toast('Job saved — could not upload photos: ' + e.message, 'info');
+            toast('Photo upload failed: ' + e.message, 'error');
           }
         }
         setUploading(false);
