@@ -63,12 +63,6 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
                   </div>
                 ))}
               </div>
-
-              {folderUrl && (
-                <a href={folderUrl} target="_blank" rel="noopener noreferrer" style={S.driveLink}>
-                  📁 Open all photos in Google Drive →
-                </a>
-              )}
             </>
           )}
         </div>
