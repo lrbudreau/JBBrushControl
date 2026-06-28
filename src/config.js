@@ -6,6 +6,7 @@ export const CONFIG = {
   GOOGLE_CLIENT_ID: '466653925608-i8n0hi19n9svfqemli3o1f6047q0p292.apps.googleusercontent.com',
   GOOGLE_API_KEY:   'AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs',
   DRIVE_SCOPE:      'https://www.googleapis.com/auth/drive.file',
+  MAPS_API_KEY:     'AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs', // same key, also enable Maps/Directions API
 
   // Indiana GIS
   INDIANA_PARCELS_URL: 'https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_2022/FeatureServer/0/query',
