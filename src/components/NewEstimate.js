@@ -7,7 +7,6 @@ export default function NewEstimate({ onComplete, onCancel, prefillJobID = null 
   const [saving, setSaving]   = useState(false);
   const [form, setForm]       = useState({
     JobID: prefillJobID || '',
-    EstimateDate: today(),
     TaxRate: '0',
     Notes: '',
   });
@@ -65,9 +64,6 @@ export default function NewEstimate({ onComplete, onCancel, prefillJobID = null 
             </option>
           ))}
         </select>
-
-        <div style={S.label}>Date</div>
-        <input type="date" style={S.input} name="EstimateDate" value={form.EstimateDate} onChange={f} />
 
         {/* Flat fee line items */}
         <div style={{ fontWeight: 700, fontSize: 14, color: '#1a4a1a', margin: '16px 0 8px' }}>
