@@ -43,21 +43,23 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
               <div style={S.grid}>
                 {photos.map((photo, i) => (
                   <div key={photo.PhotoID} style={S.thumb} onClick={() => setSelected(photo)}>
-                    {photo.ThumbnailUrl && driveAuth ? (
+                    {photo.DriveFileID ? (
                       <img
-                        src={photo.ThumbnailUrl}
+                        src={`https://drive.google.com/thumbnail?id=${photo.DriveFileID}&sz=w400`}
                         alt={photo.FileName}
                         style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }}
-                        onError={e => { e.target.style.display = 'none'; }}
+                        onError={e => {
+                          e.target.style.display = 'none';
+                          e.target.nextSibling.style.display = 'flex';
+                        }}
                       />
-                    ) : (
-                      <div style={S.thumbPlaceholder}>
-                        <span style={{ fontSize: 28 }}>🖼</span>
-                        <span style={{ fontSize: 10, color: '#6b7280', marginTop: 4 }}>
-                          {photo.FileName?.slice(0, 12) || 'Photo'}
-                        </span>
-                      </div>
-                    )}
+                    ) : null}
+                    <div style={{ ...S.thumbPlaceholder, display: photo.DriveFileID ? 'none' : 'flex' }}>
+                      <span style={{ fontSize: 28 }}>🖼</span>
+                      <span style={{ fontSize: 10, color: '#6b7280', marginTop: 4 }}>
+                        {photo.FileName?.slice(0, 12) || 'Photo'}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -80,9 +82,13 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
               <span style={{ fontWeight: 600, fontSize: 14 }}>{selected.FileName}</span>
               <button style={S.closeBtn} onClick={() => setSelected(null)}>✕</button>
             </div>
-            {selected.ThumbnailUrl && driveAuth ? (
-              <img src={selected.ThumbnailUrl.replace('=s220', '=s800')} alt={selected.FileName}
-                style={{ width: '100%', borderRadius: 8, maxHeight: '60vh', objectFit: 'contain' }} />
+            {selected.DriveFileID ? (
+              <img
+                src={`https://drive.google.com/thumbnail?id=${selected.DriveFileID}&sz=w800`}
+                alt={selected.FileName}
+                style={{ width: '100%', borderRadius: 8, maxHeight: '60vh', objectFit: 'contain' }}
+                onError={e => { e.target.style.display='none'; }}
+              />
             ) : (
               <div style={{ ...S.thumbPlaceholder, height: 200 }}>
                 <span style={{ fontSize: 48 }}>🖼</span>
