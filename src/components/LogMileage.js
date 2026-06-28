@@ -90,62 +90,55 @@ export default function LogMileage({ onClose }) {
     }));
   };
 
-  // Load Google Maps JS SDK (browser-safe, no CORS issues)
-  const loadMapsSDK = () => new Promise((resolve, reject) => {
-    if (window.google?.maps) { resolve(); return; }
-    const existing = document.getElementById('gmaps-script');
-    if (existing) { existing.onload = resolve; return; }
-    const script = document.createElement('script');
-    script.id  = 'gmaps-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs&libraries=geometry`;
-    script.onload  = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-
   const calculateDistance = async (i) => {
     const entry = entries[i];
     const addrA = resolveAddress(entry, 'A');
     const addrB = resolveAddress(entry, 'B');
 
-    if (!addrA || !addrB) {
-      return toast('Set both Point A and Point B first', 'error');
-    }
-    if (!addrA || !addrB) {
-      return toast('Could not resolve address — check Settings', 'info');
-    }
+    if (!addrA || !addrB) return toast('Set both Point A and Point B first', 'error');
 
     setCalc(i);
     try {
-      await loadMapsSDK();
+      const ORS_KEY = process.env.REACT_APP_ORS_KEY;
 
-      const service = new window.google.maps.DistanceMatrixService();
-      service.getDistanceMatrix({
-        origins:      [addrA],
-        destinations: [addrB],
-        travelMode:   window.google.maps.TravelMode.DRIVING,
-        unitSystem:   window.google.maps.UnitSystem.IMPERIAL,
-      }, (response, status) => {
-        if (status === 'OK') {
-          const element = response.rows[0].elements[0];
-          if (element.status === 'OK') {
-            // distance.text is like "12.3 mi" — extract the number
-            const text  = element.distance.text; // e.g. "12.3 mi"
-            const miles = parseFloat(text.replace(/[^0-9.]/g, '')).toFixed(1);
-            updateEntry(i, 'miles', miles);
-            toast(`${miles} miles (${element.duration.text}) ✅`);
-          } else {
-            toast('Could not find route — enter miles manually', 'info');
-          }
-        } else {
-          toast('Maps error — enter miles manually', 'info');
-        }
-        setCalc(null);
+      // Geocode both addresses
+      const geocode = async (addr) => {
+        const res  = await fetch(
+          `https://api.openrouteservice.org/geocode/search?api_key=${ORS_KEY}&text=${encodeURIComponent(addr + ', Indiana, USA')}&boundary.country=US&size=1`
+        );
+        const data = await res.json();
+        if (data.features?.length > 0) return data.features[0].geometry.coordinates; // [lng, lat]
+        throw new Error('Address not found: ' + addr);
+      };
+
+      const [coordsA, coordsB] = await Promise.all([geocode(addrA), geocode(addrB)]);
+
+      // Get driving distance
+      const dirRes  = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+        method: 'POST',
+        headers: {
+          'Authorization': ORS_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ coordinates: [coordsA, coordsB], units: 'mi' }),
       });
+      const dirData = await dirRes.json();
+
+      if (dirData.routes?.length > 0) {
+        const summary = dirData.routes[0].summary;
+        const miles   = summary.distance.toFixed(1);
+        const mins    = Math.round(summary.duration / 60);
+        const timeStr = mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins} min`;
+        updateEntry(i, 'miles', miles);
+        toast(`${miles} miles · ${timeStr} ✅`);
+      } else {
+        toast('Could not find route — enter miles manually', 'info');
+      }
     } catch (e) {
-      toast('Maps failed to load — enter miles manually', 'info');
-      setCalc(null);
+      console.error('ORS error:', e);
+      toast('Could not calculate — enter miles manually', 'info');
     }
+    setCalc(null);
   };
 
   const openInMaps = (i) => {
