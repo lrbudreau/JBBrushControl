@@ -1,43 +1,33 @@
 import React, { useEffect, useState } from 'react';
-import { api, getUser } from '../api';
+import { api } from '../api';
 import { toast } from './Toast';
 
-const HOME_ADDRESS = ''; // Will be pulled from Settings
+const GMAPS_KEY = 'AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs';
 
 export default function LogMileage({ onClose }) {
-  const user = getUser();
-  const [equipment, setEquip] = useState([]);
-  const [jobs, setJobs]       = useState([]);
+  const [equipment, setEquip]     = useState([]);
+  const [jobs, setJobs]           = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [saving, setSaving]   = useState(false);
-  const [calculating, setCalc] = useState(null);
-  const [homeAddress, setHomeAddress] = useState('');
-  const [date, setDate]       = useState(today());
-  const [entries, setEntries] = useState([blankEntry()]);
+  const [saving, setSaving]       = useState(false);
+  const [calculating, setCalc]    = useState(null);
+  const [homeAddress, setHome]    = useState('');
+  const [date, setDate]           = useState(today());
+  const [entries, setEntries]     = useState([blankEntry()]);
 
   useEffect(() => {
-    Promise.all([
-      api('getEquipment'),
-      api('getJobs'),
-      api('getCustomers'),
-      api('getSettings'),
-    ]).then(([e, j, c, s]) => {
-      if (e.status === 'ok') setEquip(e.data.filter(x => ['Truck','Trailer'].includes(x.Type)));
-      if (j.status === 'ok') setJobs(j.data);
-      if (c.status === 'ok') setCustomers(c.data);
-      if (s.status === 'ok') {
-        const d     = s.data;
-        const addr  = d.HomeAddress || d.Address || '';
-        const city  = d.City  || '';
-        const state = d.State || 'IN';
-        const zip   = d.Zip   || '';
-        const full  = [addr, city, state + ' ' + zip].filter(Boolean).join(', ').trim();
-        console.log('Home address loaded:', full);
-        setHomeAddress(full);
-      } else {
-        console.warn('getSettings failed:', s);
-      }
-    });
+    Promise.all([api('getEquipment'), api('getJobs'), api('getCustomers'), api('getSettings')])
+      .then(([e, j, c, s]) => {
+        if (e.status === 'ok') setEquip(e.data.filter(x => ['Truck','Trailer'].includes(x.Type)));
+        if (j.status === 'ok') setJobs(j.data);
+        if (c.status === 'ok') setCustomers(c.data);
+        if (s.status === 'ok') {
+          const d = s.data;
+          const full = [d.Address || d.HomeAddress, d.City, (d.State || 'IN') + ' ' + (d.Zip || '')]
+            .filter(Boolean).join(', ').trim();
+          setHome(full);
+          console.log('Home address:', full);
+        }
+      });
   }, []);
 
   function blankEntry() {
@@ -50,122 +40,103 @@ export default function LogMileage({ onClose }) {
     };
   }
 
-  // Resolve address from type selection
   function resolveAddress(entry, side) {
-    const type    = side === 'A' ? entry.pointAType    : entry.pointBType;
-    const custom  = side === 'A' ? entry.pointACustom  : entry.pointBCustom;
-    const jobID   = side === 'A' ? entry.pointAJobID   : entry.pointBJobID;
-
+    const type   = side === 'A' ? entry.pointAType   : entry.pointBType;
+    const custom = side === 'A' ? entry.pointACustom : entry.pointBCustom;
+    const jobID  = side === 'A' ? entry.pointAJobID  : entry.pointBJobID;
+    if (type === 'home')   return homeAddress;
     if (type === 'custom') return custom;
-    if (type === 'home')   return homeAddress || 'home';
     if (type === 'job') {
-      const job      = jobs.find(j => j.JobID === jobID);
-      const customer = job ? customers.find(c => c.CustomerID === job.CustomerID) : null;
-      if (customer) {
-        const parts = [customer.Address, customer.City, customer.State, customer.Zip].filter(Boolean);
-        return parts.join(', ');
-      }
-      return '';
+      const job = jobs.find(j => j.JobID === jobID);
+      const cust = job ? customers.find(c => c.CustomerID === job.CustomerID) : null;
+      if (cust) return [cust.Address, cust.City, cust.State, cust.Zip].filter(Boolean).join(', ');
     }
     return '';
   }
 
-  function getAddressDisplay(entry, side) {
-    const addr = resolveAddress(entry, side);
-    return addr || '—';
-  }
-
   const updateEntry = (i, field, val) => {
-    setEntries(entries => entries.map((e, idx) => {
+    setEntries(prev => prev.map((e, idx) => {
       if (idx !== i) return e;
       const next = { ...e, [field]: val };
       if (field === 'equipmentID') {
         const eq = equipment.find(x => x.EquipmentID === val);
         if (eq) next.truckName = eq.Name;
       }
-      // Link job to the trip automatically
       if (field === 'pointBJobID' && next.pointBType === 'job') next.jobID = val;
       if (field === 'pointAJobID' && next.pointAType === 'job') next.jobID = val;
-      // Recalculate total
       if (field === 'miles' || field === 'rounds') {
         const m = parseFloat(field === 'miles' ? val : next.miles) || 0;
-        const r = parseInt(field === 'rounds' ? val : next.rounds) || 1;
+        const r = parseInt(field === 'rounds'  ? val : next.rounds) || 1;
         if (m) next.totalMiles = (m * r).toFixed(1);
       }
       return next;
     }));
   };
 
+  // Load Google Maps JS SDK
+  const loadMapsSDK = () => new Promise((resolve, reject) => {
+    if (window.google?.maps?.DistanceMatrixService) { resolve(); return; }
+    const existing = document.getElementById('gmaps-sdk');
+    if (existing) { existing.addEventListener('load', resolve); return; }
+    const script = document.createElement('script');
+    script.id  = 'gmaps-sdk';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}`;
+    script.onload  = resolve;
+    script.onerror = () => reject(new Error('Failed to load Google Maps'));
+    document.head.appendChild(script);
+  });
+
   const calculateDistance = async (i) => {
     const entry = entries[i];
     const addrA = resolveAddress(entry, 'A');
     const addrB = resolveAddress(entry, 'B');
 
-    if (!addrA || !addrB) return toast('Set both Point A and Point B first', 'error');
+    if (!addrA) return toast('Set Point A first', 'error');
+    if (!addrB) return toast('Set Point B first', 'error');
 
-    // Guard: if home address not loaded yet, warn user
-    if (addrA === 'home' || addrB === 'home') {
-      return toast('Home address not loaded yet — wait a moment and try again', 'error');
-    }
-
-    console.log('Calculating distance from:', addrA, 'to:', addrB);
+    console.log('Calculating:', addrA, '->', addrB);
     setCalc(i);
+
     try {
-      const ORS_KEY = process.env.REACT_APP_ORS_KEY;
+      await loadMapsSDK();
 
-      // Use Google Geocoding API for rural Indiana addresses (much better accuracy)
-      // 10,000 free requests/month — a small business will never exceed this
-      const GMAPS_KEY = 'AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs';
-      const geocode = async (addr) => {
-        const hasState = /IN|indiana/i.test(addr);
-        const fullAddr = hasState ? addr : addr + ', IN';
-        const res  = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddr)}&key=${GMAPS_KEY}`
-        );
-        const data = await res.json();
-        if (data.status === 'OK' && data.results?.length > 0) {
-          const loc = data.results[0].geometry.location;
-          console.log('Geocoded "' + addr + '" ->', data.results[0].formatted_address, loc);
-          return [loc.lng, loc.lat]; // ORS expects [lng, lat]
-        }
-        console.error('Geocode failed for:', addr, data.status);
-        throw new Error('Address not found: ' + addr);
-      };
-
-      const [coordsA, coordsB] = await Promise.all([geocode(addrA), geocode(addrB)]);
-
-      // Get driving distance
-      const dirRes  = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
-        method: 'POST',
-        headers: {
-          'Authorization': ORS_KEY,
-          'Content-Type': 'application/json',
+      const service = new window.google.maps.DistanceMatrixService();
+      service.getDistanceMatrix(
+        {
+          origins:      [addrA],
+          destinations: [addrB],
+          travelMode:   window.google.maps.TravelMode.DRIVING,
+          unitSystem:   window.google.maps.UnitSystem.IMPERIAL,
         },
-        body: JSON.stringify({ coordinates: [coordsA, coordsB], units: 'mi' }),
-      });
-      const dirData = await dirRes.json();
-
-      if (dirData.routes?.length > 0) {
-        const summary = dirData.routes[0].summary;
-        const miles   = summary.distance.toFixed(1);
-        const mins    = Math.round(summary.duration / 60);
-        const timeStr = mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins} min`;
-        updateEntry(i, 'miles', miles);
-        toast(`${miles} miles · ${timeStr} ✅`);
-      } else {
-        toast('Could not find route — enter miles manually', 'info');
-      }
+        (response, status) => {
+          setCalc(null);
+          if (status !== 'OK') {
+            console.error('Distance Matrix status:', status);
+            toast('Maps error (' + status + ') — enter miles manually', 'error');
+            return;
+          }
+          const element = response.rows[0].elements[0];
+          if (element.status !== 'OK') {
+            toast('Could not find route — enter miles manually', 'info');
+            return;
+          }
+          const miles   = (element.distance.value / 1609.344).toFixed(1);
+          const mins    = Math.round(element.duration.value / 60);
+          const timeStr = mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins} min`;
+          updateEntry(i, 'miles', miles);
+          toast(`${miles} miles · ${timeStr} ✅`);
+        }
+      );
     } catch (e) {
-      console.error('ORS error:', e);
-      toast('Could not calculate — enter miles manually', 'info');
+      setCalc(null);
+      console.error('Maps SDK error:', e);
+      toast('Could not load Maps — enter miles manually', 'error');
     }
-    setCalc(null);
   };
 
   const openInMaps = (i) => {
-    const entry = entries[i];
-    const addrA = resolveAddress(entry, 'A');
-    const addrB = resolveAddress(entry, 'B');
+    const addrA = resolveAddress(entries[i], 'A');
+    const addrB = resolveAddress(entries[i], 'B');
     if (!addrA || !addrB) return toast('Set both points first', 'info');
     window.open(`https://www.google.com/maps/dir/${encodeURIComponent(addrA)}/${encodeURIComponent(addrB)}`, '_blank');
   };
@@ -176,21 +147,17 @@ export default function LogMileage({ onClose }) {
     setSaving(true);
     let count = 0;
     for (const entry of valid) {
-      const addrA = resolveAddress(entry, 'A');
-      const addrB = resolveAddress(entry, 'B');
       const miles = parseFloat(entry.totalMiles || entry.miles) || 0;
       const r = await api('addMileage', {}, {
         Date:        date,
         EquipmentID: entry.equipmentID,
         TruckName:   entry.truckName,
         JobID:       entry.jobID || '',
-        StartMiles:  0,
-        EndMiles:    0,
         TotalMiles:  miles,
-        Purpose:     entry.purpose || (addrA && addrB ? `${addrA} → ${addrB}` : ''),
+        Purpose:     entry.purpose || (resolveAddress(entry,'A') && resolveAddress(entry,'B') ? `${resolveAddress(entry,'A')} → ${resolveAddress(entry,'B')}` : ''),
         Division:    entry.division,
-        PointA:      addrA,
-        PointB:      addrB,
+        PointA:      resolveAddress(entry, 'A'),
+        PointB:      resolveAddress(entry, 'B'),
         Rounds:      parseInt(entry.rounds) || 1,
       });
       if (r.status === 'ok') count++;
@@ -207,7 +174,7 @@ export default function LogMileage({ onClose }) {
       <div style={S.sheet}>
         <div style={S.handle} />
         <div style={S.header}>
-          <h3 style={{ fontSize: 17, fontWeight: 700 }}>Log Mileage</h3>
+          <h3 style={{ fontSize:17, fontWeight:700 }}>Log Mileage</h3>
           <button style={S.closeBtn} onClick={onClose}>✕</button>
         </div>
 
@@ -217,53 +184,42 @@ export default function LogMileage({ onClose }) {
 
           {entries.map((entry, i) => (
             <div key={i} style={S.entryCard}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
                 <div style={{ fontWeight:700, fontSize:13, color:'#1a4a1a' }}>Trip {i+1}</div>
                 {entries.length > 1 && (
-                  <button onClick={() => setEntries(e => e.filter((_,idx) => idx !== i))} style={S.removeBtn}>Remove</button>
+                  <button onClick={() => setEntries(e => e.filter((_,idx) => idx!==i))} style={S.removeBtn}>Remove</button>
                 )}
               </div>
 
-              {/* Truck */}
               <div style={S.label}>Truck *</div>
               <select style={S.input} value={entry.equipmentID} onChange={e => updateEntry(i,'equipmentID',e.target.value)}>
                 <option value="">— Select truck —</option>
                 {equipment.map(e => <option key={e.EquipmentID} value={e.EquipmentID}>{e.Name}</option>)}
               </select>
 
-              {/* Division */}
               <div style={S.label}>Division</div>
               <select style={S.input} value={entry.division} onChange={e => updateEntry(i,'division',e.target.value)}>
                 <option>Spray</option><option>Tree</option>
               </select>
 
-              {/* Point A */}
               <div style={S.label}>From (Point A)</div>
               <PointSelector
-                typeVal={entry.pointAType}
-                jobVal={entry.pointAJobID}
-                customVal={entry.pointACustom}
-                jobs={jobs}
-                display={getAddressDisplay(entry, 'A')}
+                typeVal={entry.pointAType} jobVal={entry.pointAJobID} customVal={entry.pointACustom}
+                jobs={jobs} preview={resolveAddress(entry,'A')}
                 onTypeChange={v => updateEntry(i,'pointAType',v)}
-                onJobChange={v => updateEntry(i,'pointAJobID',v)}
+                onJobChange={v  => updateEntry(i,'pointAJobID',v)}
                 onCustomChange={v => updateEntry(i,'pointACustom',v)}
               />
 
-              {/* Point B */}
               <div style={S.label}>To (Point B)</div>
               <PointSelector
-                typeVal={entry.pointBType}
-                jobVal={entry.pointBJobID}
-                customVal={entry.pointBCustom}
-                jobs={jobs}
-                display={getAddressDisplay(entry, 'B')}
+                typeVal={entry.pointBType} jobVal={entry.pointBJobID} customVal={entry.pointBCustom}
+                jobs={jobs} preview={resolveAddress(entry,'B')}
                 onTypeChange={v => updateEntry(i,'pointBType',v)}
-                onJobChange={v => updateEntry(i,'pointBJobID',v)}
+                onJobChange={v  => updateEntry(i,'pointBJobID',v)}
                 onCustomChange={v => updateEntry(i,'pointBCustom',v)}
               />
 
-              {/* Calculate buttons */}
               <div style={{ display:'flex', gap:8, marginTop:10 }}>
                 <button style={S.calcBtn} onClick={() => calculateDistance(i)} disabled={calculating===i}>
                   {calculating===i ? '…' : '📍 Calc miles'}
@@ -271,7 +227,6 @@ export default function LogMileage({ onClose }) {
                 <button style={S.mapsBtn} onClick={() => openInMaps(i)}>🗺 Maps</button>
               </div>
 
-              {/* Miles + Rounds */}
               <div style={{ display:'flex', gap:8, marginTop:8 }}>
                 <div style={{ flex:1 }}>
                   <div style={S.label}>One-way miles</div>
@@ -285,8 +240,7 @@ export default function LogMileage({ onClose }) {
                 </div>
               </div>
 
-              {/* Entry total */}
-              {(entry.miles || entry.totalMiles) && entry.rounds > 1 && (
+              {parseFloat(entry.miles) > 0 && parseInt(entry.rounds) > 1 && (
                 <div style={S.entryTotal}>
                   {entry.miles} mi × {entry.rounds} rounds = <strong>{entry.totalMiles} mi</strong>
                 </div>
@@ -323,51 +277,30 @@ export default function LogMileage({ onClose }) {
   );
 }
 
-// ── Point selector component ──────────────────────────────────
-function PointSelector({ typeVal, jobVal, customVal, jobs, display, onTypeChange, onJobChange, onCustomChange }) {
+function PointSelector({ typeVal, jobVal, customVal, jobs, preview, onTypeChange, onJobChange, onCustomChange }) {
   return (
     <div>
-      {/* Type toggle buttons */}
       <div style={{ display:'flex', gap:6, marginBottom:8 }}>
-        {[
-          { val:'home',   label:'🏠 Home' },
-          { val:'job',    label:'📍 Job site' },
-          { val:'custom', label:'✏️ Type address' },
-        ].map(opt => (
-          <button key={opt.val}
-            style={{
-              flex:1, padding:'7px 4px', borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer',
-              border: typeVal===opt.val ? '2px solid #1a4a1a' : '2px solid #d1d5db',
-              background: typeVal===opt.val ? '#e8f5e8' : 'white',
-              color: typeVal===opt.val ? '#1a4a1a' : '#6b7280',
-            }}
-            onClick={() => onTypeChange(opt.val)}
-          >
-            {opt.label}
-          </button>
+        {[{val:'home',label:'🏠 Home'},{val:'job',label:'📍 Job site'},{val:'custom',label:'✏️ Custom'}].map(opt => (
+          <button key={opt.val} style={{
+            flex:1, padding:'7px 4px', borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer',
+            border: typeVal===opt.val ? '2px solid #1a4a1a' : '2px solid #d1d5db',
+            background: typeVal===opt.val ? '#e8f5e8' : 'white',
+            color: typeVal===opt.val ? '#1a4a1a' : '#6b7280',
+          }} onClick={() => onTypeChange(opt.val)}>{opt.label}</button>
         ))}
       </div>
-
-      {/* Job selector */}
       {typeVal === 'job' && (
         <select style={PS.input} value={jobVal} onChange={e => onJobChange(e.target.value)}>
           <option value="">— Select job —</option>
-          {jobs.map(j => (
-            <option key={j.JobID} value={j.JobID}>
-              {j.CustomerName} — {j.Description?.slice(0,35)}
-            </option>
-          ))}
+          {jobs.map(j => <option key={j.JobID} value={j.JobID}>{j.CustomerName} — {j.Description?.slice(0,35)}</option>)}
         </select>
       )}
-
-      {/* Custom address */}
       {typeVal === 'custom' && (
         <input style={PS.input} placeholder="Enter address…" value={customVal} onChange={e => onCustomChange(e.target.value)} />
       )}
-
-      {/* Address preview */}
-      {typeVal !== 'custom' && display && display !== '—' && (
-        <div style={PS.preview}>{display}</div>
+      {preview && typeVal !== 'custom' && (
+        <div style={PS.preview}>{preview}</div>
       )}
     </div>
   );
