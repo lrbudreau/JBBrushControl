@@ -18,7 +18,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
 
   // Forms
   const [customer, setCustomer] = useState({ Name:'', Phone:'', Email:'', Address:'', City:'', State:'IN', Zip:'', County:'', Division:'Spray' });
-  const [job, setJob]           = useState({ Description:'', JobDate: today(), Notes:'' });
+  const [job, setJob]           = useState({ Description:'', Priority:'Normal', Notes:'' });
   const [lineItems, setLineItems] = useState([{ description:'', qty:1, rate:'', amount:'' }]);
   const [taxRate, setTaxRate]   = useState('0');
   const [photos, setPhotos]     = useState([]);
@@ -92,9 +92,12 @@ export default function NewJobFlow({ onComplete, onCancel }) {
 
       // 2. Create job
       const jobRes = await api('addJob', {}, {
-        CustomerID: customerID, Division: customer.Division,
-        Description: job.Description, JobDate: job.JobDate,
-        Status: 'Estimate', Notes: job.Notes,
+        CustomerID:  customerID,
+        Division:    customer.Division,
+        Description: job.Description,
+        Priority:    job.Priority || 'Normal',
+        Status:      'Estimate',
+        Notes:       job.Notes,
       });
       if (jobRes.status !== 'ok') { toast('Failed to save job', 'error'); setSaving(false); return; }
       const jobID = jobRes.data.JobID;
@@ -266,6 +269,23 @@ export default function NewJobFlow({ onComplete, onCancel }) {
         {step === 2 && (
           <div>
             <div style={S.stepTitle}>🔧 Job Details</div>
+            <div style={S.label}>Priority</div>
+            <div style={{ display:'flex', gap:10, marginBottom:4 }}>
+              {['Normal','Urgent'].map(p => (
+                <button key={p} type="button"
+                  onClick={() => setJob(j => ({...j, Priority: p}))}
+                  style={{
+                    flex:1, padding:'12px', borderRadius:8, border:'2px solid',
+                    borderColor: job.Priority===p ? (p==='Urgent'?'#dc2626':'#1a4a1a') : '#d1d5db',
+                    background: job.Priority===p ? (p==='Urgent'?'#fee2e2':'#e8f5e8') : 'white',
+                    color: job.Priority===p ? (p==='Urgent'?'#dc2626':'#1a4a1a') : '#6b7280',
+                    fontWeight: 700, fontSize:14, cursor:'pointer',
+                  }}>
+                  {p === 'Urgent' ? '🔴 Urgent' : '🟢 Normal'}
+                </button>
+              ))}
+            </div>
+
             <div style={S.label}>Description *</div>
             <textarea style={{ ...S.input, minHeight:100, resize:'vertical' }} name="Description"
               value={job.Description} onChange={fj} placeholder="Describe the work to be done…" />
@@ -393,7 +413,6 @@ export default function NewJobFlow({ onComplete, onCancel }) {
   );
 }
 
-function today() { return new Date().toISOString().split('T')[0]; }
 
 const S = {
   wrap:       { position:'fixed', inset:0, background:'#f0f4f0', zIndex:300, display:'flex', flexDirection:'column', maxWidth:480, margin:'0 auto' },
