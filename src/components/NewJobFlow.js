@@ -142,12 +142,18 @@ export default function NewJobFlow({ onComplete, onCancel }) {
         setUploading(false);
       }
 
-      // 4. Create estimate if line items exist
-      if (lineItems.some(i => i.description && i.rate)) {
-        await api('addEstimate', {}, {
-          JobID: jobID, LineItems: lineItems,
-          Subtotal: subtotal.toFixed(2), TaxRate: taxRate,
+      // 4. Create estimate if any line items have a description
+      const validItems = lineItems.filter(i => i.description);
+      if (validItems.length > 0) {
+        const estRes = await api('addEstimate', {}, {
+          JobID:     jobID,
+          LineItems: JSON.stringify(validItems),
+          Subtotal:  subtotal.toFixed(2),
+          TaxRate:   taxRate,
         });
+        if (estRes.status !== 'ok') {
+          toast('Job saved but estimate failed: ' + estRes.message, 'info');
+        }
       }
 
       toast(`Job created! ${photos.length > 0 ? `${photos.length} photo(s) uploaded.` : ''}`);
