@@ -133,7 +133,17 @@ export function MobileJobs() {
 
   useEffect(() => {
     api('getJobs').then(r => {
-      if (r.status==='ok') setJobs(r.data.slice().sort((a,b) => (b.JobDate||'').localeCompare(a.JobDate||'')));
+      if (r.status==='ok') {
+        // Filter out Canceled and Finished for My Jobs view
+        const active = r.data.filter(j => !['Canceled','Finished'].includes(j.Status));
+        // Sort: Urgent first, then by CustomerName
+        active.sort((a,b) => {
+          if (a.Priority==='Urgent' && b.Priority!=='Urgent') return -1;
+          if (b.Priority==='Urgent' && a.Priority!=='Urgent') return  1;
+          return (a.CustomerName||'').localeCompare(b.CustomerName||'');
+        });
+        setJobs(active);
+      }
       setLoading(false);
     });
   }, []);
@@ -159,12 +169,24 @@ export function MobileJobs() {
         {loading ? <div className="card-body"><p className="text-muted">Loading…</p></div>
         : visible.length === 0 ? <div className="empty"><div className="empty-icon">🔧</div><p>No jobs found.</p></div>
         : visible.map(j => (
-          <div key={j.JobID} className="list-item" onClick={() => setSelectedJobID(j.JobID)} style={{ cursor:'pointer' }}>
-            <div className="list-item-main">
-              <div className="list-item-title">{j.CustomerName || '—'}</div>
-              <div className="list-item-sub">{j.JobDate} · {j.Description?.slice(0,40)}</div>
+          <div key={j.JobID}
+            onClick={() => setSelectedJobID(j.JobID)}
+            style={{
+              display:'flex', alignItems:'center', justifyContent:'space-between',
+              padding:'14px 16px', borderBottom:'1px solid #f3f4f6', cursor:'pointer', gap:10,
+              background: j.Priority==='Urgent' ? '#fff5f5' : 'white',
+              borderLeft: j.Priority==='Urgent' ? '4px solid #dc2626' : '4px solid transparent',
+            }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                {j.Priority==='Urgent' && <span style={{ fontSize:12 }}>🔴</span>}
+                <span style={{ fontSize:15, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {j.CustomerName || '—'}
+                </span>
+              </div>
+              <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{j.Description?.slice(0,45)}</div>
             </div>
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4, flexShrink:0 }}>
               {j.Division==='Spray' ? <span className="div-spray">Spray</span> : <span className="div-tree">Tree</span>}
               <span style={{ fontSize:11, fontWeight:700, color: STATUS_COLOR[j.Status]||'#6b7280' }}>{j.Status}</span>
             </div>
