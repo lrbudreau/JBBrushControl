@@ -1,17 +1,53 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { api, formatDate } from '../api';
+import { getJobFolder, uploadPhoto, requestDriveAccess } from '../hooks/useDrive';
+import { toast } from './Toast';
 
 export default function PhotoViewer({ jobID, folderUrl, onClose }) {
-  const [photos, setPhotos]   = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [photos, setPhotos]     = useState([]);
+  const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef();
 
-  useEffect(() => {
+  const load = () => {
     api('getPhotos', { jobID }).then(r => {
       if (r.status === 'ok') setPhotos(r.data);
       setLoading(false);
     });
-  }, [jobID]);
+  };
+
+  useEffect(() => { load(); }, [jobID]);
+
+  const handleFileSelect = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      await requestDriveAccess();
+      const { folderId, folderUrl: fUrl } = await getJobFolder(jobID, '');
+      for (const file of files) {
+        const result = await uploadPhoto(file, folderId);
+        if (result.id) {
+          await api('addPhoto', {}, {
+            JobID:        jobID,
+            ExpenseID:    '',
+            FileName:     result.name || file.name,
+            DriveFileID:  result.id,
+            DriveUrl:     result.webViewLink || `https://drive.google.com/file/d/${result.id}/view`,
+            ThumbnailUrl: result.thumbnailLink || '',
+          });
+        }
+      }
+      toast(`${files.length} photo(s) uploaded ✅`);
+      load(); // Reload photos
+    } catch (e) {
+      console.error('Upload error:', e);
+      toast('Upload failed: ' + e.message, 'error');
+    }
+    setUploading(false);
+    e.target.value = ''; // Reset input
+  };
 
   return (
     <div style={S.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
@@ -19,7 +55,18 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
         <div style={S.handle} />
         <div style={S.header}>
           <h3 style={{ fontSize:17, fontWeight:700 }}>📸 Job Photos</h3>
-          <button style={S.closeBtn} onClick={onClose}>✕</button>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            {/* Hidden file input */}
+            <input ref={fileRef} type="file" accept="image/*" multiple
+              style={{ display:'none' }} onChange={handleFileSelect} />
+            <button
+              style={S.uploadBtn}
+              onClick={() => fileRef.current.click()}
+              disabled={uploading}>
+              {uploading ? '⏳ Uploading…' : '+ Add Photos'}
+            </button>
+            <button style={S.closeBtn} onClick={onClose}>✕</button>
+          </div>
         </div>
 
         <div style={S.body}>
@@ -28,13 +75,16 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
           ) : photos.length === 0 ? (
             <div style={{ textAlign:'center', padding:'32px 16px', color:'#9ca3af' }}>
               <div style={{ fontSize:40, marginBottom:10 }}>📷</div>
-              <p>No photos for this job yet.</p>
-              <p style={{ fontSize:12, marginTop:6 }}>Photos are added during the New Job flow.</p>
+              <p>No photos yet.</p>
+              <button style={{ ...S.uploadBtn, marginTop:14, padding:'10px 20px' }}
+                onClick={() => fileRef.current.click()} disabled={uploading}>
+                {uploading ? '⏳ Uploading…' : '+ Add First Photo'}
+              </button>
             </div>
           ) : (
             <>
               <div style={S.grid}>
-                {photos.map((photo) => (
+                {photos.map(photo => (
                   <div key={photo.PhotoID} style={S.thumb} onClick={() => setSelected(photo)}>
                     {photo.DriveFileID ? (
                       <img
@@ -105,6 +155,7 @@ const S = {
   sheet:            { background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:480, margin:'0 auto', maxHeight:'85vh', display:'flex', flexDirection:'column', animation:'slideUp 0.25s ease' },
   handle:           { width:40, height:4, background:'#d1d5db', borderRadius:99, margin:'10px auto 0' },
   header:           { padding:'12px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid #f3f4f6' },
+  uploadBtn:        { background:'#1a4a1a', color:'white', border:'none', padding:'7px 14px', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' },
   closeBtn:         { background:'none', border:'none', fontSize:18, cursor:'pointer', color:'#6b7280', padding:'4px 8px' },
   body:             { padding:16, overflowY:'auto', flex:1 },
   grid:             { display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginBottom:16 },
