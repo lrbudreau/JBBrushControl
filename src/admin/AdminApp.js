@@ -259,7 +259,7 @@ function AdminInvoices() {
     { key:'CustomerName', label:'Customer',    width:150 },
     { key:'Division',     label:'Division',    width:80,  render: DivisionBadge },
     { key:'IssueDate',    label:'Issued',      width:110, render: v => formatDate(v) },
-    { key:'DueDate',      label:'Due',         width:100 },
+    { key:'DueDate',      label:'Due',         width:100, render: v => formatDate(v)  },
     { key:'Total',        label:'Total',       width:100, render: CurrencyCell },
     { key:'Status',       label:'Status',      width:130, render: StatusBadge },
     { key:'PaidDate',     label:'Paid',        width:110, render: v => formatDate(v) },
