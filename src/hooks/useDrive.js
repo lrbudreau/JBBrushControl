@@ -19,49 +19,70 @@ function loadGSI() {
 }
 
 // ── Get access token — silent first, prompt only if needed ────
+// IMPORTANT for iPhone/Safari: the Google sign-in popup is only allowed
+// right after a tap. Call this at the very START of a tap handler,
+// before any other `await`, or Safari blocks the popup and it never
+// finishes (that was the "photos timed out" problem).
+let pending = null;
+
 export async function requestDriveAccess(forcePrompt = false) {
   // Return cached token if still valid
   if (!forcePrompt && accessToken && tokenExpiry && Date.now() < tokenExpiry) {
     return accessToken;
   }
+  // If a request is already in flight, share it instead of starting another
+  if (pending) return pending;
 
-  await loadGSI();
-
-  return new Promise((resolve, reject) => {
-    if (!tokenClient) {
-      tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.file',
-        callback: (response) => {
-          if (response.error) {
-            console.error('Drive auth error:', response.error);
-            reject(new Error(response.error));
-            return;
-          }
-          accessToken = response.access_token;
-          tokenExpiry = Date.now() + ((response.expires_in || 3600) * 1000) - 60000;
-          console.log('✅ Drive access token obtained');
-          resolve(accessToken);
-        },
-      });
-    } else {
-      tokenClient.callback = (response) => {
-        if (response.error) { reject(new Error(response.error)); return; }
+  pending = (async () => {
+    await loadGSI();
+    return new Promise((resolve, reject) => {
+      const onToken = (response) => {
+        if (response.error) {
+          console.error('Drive auth error:', response.error);
+          reject(new Error(response.error_description || response.error));
+          return;
+        }
         accessToken = response.access_token;
         tokenExpiry = Date.now() + ((response.expires_in || 3600) * 1000) - 60000;
         resolve(accessToken);
       };
-    }
-    // '' = silent if already authorized, 'consent' = force prompt
-    tokenClient.requestAccessToken({ prompt: forcePrompt ? 'consent' : '' });
-  });
+      // Fires if the popup is blocked or the user closes it — without this
+      // the promise would hang forever.
+      const onError = (err) => {
+        const type = err?.type || 'unknown';
+        reject(new Error(
+          type === 'popup_failed_to_open' ? 'Google sign-in popup was blocked. Allow popups and try again.' :
+          type === 'popup_closed'         ? 'Google sign-in was closed before finishing.' :
+          'Google sign-in failed (' + type + ')'
+        ));
+      };
+      if (!tokenClient) {
+        tokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: CONFIG.GOOGLE_CLIENT_ID,
+          scope: CONFIG.DRIVE_SCOPE,
+          callback: onToken,
+          error_callback: onError,
+        });
+      } else {
+        tokenClient.callback = onToken;
+        tokenClient.error_callback = onError;
+      }
+      // '' = silent if already authorized, 'consent' = force prompt
+      tokenClient.requestAccessToken({ prompt: forcePrompt ? 'consent' : '' });
+    });
+  })();
+
+  try { return await pending; }
+  finally { pending = null; }
 }
 
 // ── Drive API helpers ─────────────────────────────────────────
 async function driveGet(url) {
   const token = await requestDriveAccess();
   const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  return res.json();
+  const json  = await res.json();
+  if (json.error) throw new Error(json.error.message || 'Google Drive error');
+  return json;
 }
 
 async function drivePost(url, body, isMultipart = false) {
@@ -73,14 +94,19 @@ async function drivePost(url, body, isMultipart = false) {
       : { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: isMultipart ? body : JSON.stringify(body),
   });
-  return res.json();
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message || 'Google Drive error');
+  return json;
 }
+
+// Drive search queries break on names with an apostrophe (e.g. O'Brien)
+function q(str) { return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 
 // ── Find or create folder ─────────────────────────────────────
 async function findOrCreateFolder(name, parentId = null) {
   const q = parentId
-    ? `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`
-    : `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    ? `name='${q(name)}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`
+    : `name='${q(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
 
   const search = await driveGet(
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`
@@ -93,6 +119,7 @@ async function findOrCreateFolder(name, parentId = null) {
     mimeType: 'application/vnd.google-apps.folder',
     ...(parentId ? { parents: [parentId] } : {}),
   });
+  if (!folder.id) throw new Error('Could not create Drive folder "' + name + '"');
   return folder.id;
 }
 

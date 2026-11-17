@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, localToday } from '../api';
 import { toast } from './Toast';
 
 const GMAPS_KEY = 'AIzaSyBJJfviDkCCNHPKkDFTmwtsn9aufjKzCBs';
@@ -312,7 +312,7 @@ const PS = {
   preview: { fontSize:12, color:'#6b7280', padding:'6px 10px', background:'#f3f4f6', borderRadius:6, marginTop:4 },
 };
 
-function today() { return new Date().toISOString().split('T')[0]; }
+function today() { return localToday(); }
 
 const S = {
   overlay:    { position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:300, display:'flex', alignItems:'flex-end' },

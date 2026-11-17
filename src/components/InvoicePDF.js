@@ -1,7 +1,7 @@
 // InvoicePDF.js — generates and downloads a PDF invoice
 // Uses the browser's print-to-PDF capability via a hidden iframe
 
-import { CONFIG } from '../config';
+import { formatDate } from '../api';
 
 export function downloadInvoicePDF(invoice, settings = {}) {
   const company  = settings.CompanyName || 'JB Brush Control';
@@ -92,8 +92,8 @@ export function downloadInvoicePDF(invoice, settings = {}) {
   </div>
 
   <div class="meta">
-    <div class="meta-item"><label>Issue Date</label><span>${invoice.IssueDate || ''}</span></div>
-    <div class="meta-item"><label>Due Date</label><span>${invoice.DueDate || 'Upon receipt'}</span></div>
+    <div class="meta-item"><label>Issue Date</label><span>${formatDate(invoice.IssueDate)}</span></div>
+    <div class="meta-item"><label>Due Date</label><span>${invoice.DueDate ? formatDate(invoice.DueDate) : 'Upon receipt'}</span></div>
     <div class="meta-item"><label>Invoice #</label><span>${invoice.InvoiceID}</span></div>
   </div>
 
@@ -108,7 +108,7 @@ export function downloadInvoicePDF(invoice, settings = {}) {
     <div class="totals-row"><span>Subtotal</span><span>$${parseFloat(invoice.Subtotal||0).toFixed(2)}</span></div>
     <div class="totals-row"><span>Tax (${(parseFloat(invoice.TaxRate||0)*100).toFixed(0)}%)</span><span>$${parseFloat(invoice.TaxAmount||0).toFixed(2)}</span></div>
     <div class="totals-final"><span>Total Due</span><span>$${parseFloat(invoice.Total||0).toFixed(2)}</span></div>
-    ${invoice.Status==='Paid' ? `<div style="margin-top:8px;text-align:center;color:#166534;font-weight:bold;">✅ PAID ${invoice.PaidDate ? 'on ' + invoice.PaidDate : ''} ${invoice.PaymentMethod ? '· ' + invoice.PaymentMethod : ''}</div>` : ''}
+    ${invoice.Status==='Paid' ? `<div style="margin-top:8px;text-align:center;color:#166534;font-weight:bold;">✅ PAID ${invoice.PaidDate ? 'on ' + formatDate(invoice.PaidDate) : ''} ${invoice.PaymentMethod ? '· ' + invoice.PaymentMethod : ''}</div>` : ''}
   </div>
 
   <div class="footer">

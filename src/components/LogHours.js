@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, getUser, isOwnerOrAdmin } from '../api';
+import { api, getUser, isOwnerOrAdmin, localToday } from '../api';
 import { toast } from './Toast';
 
 export default function LogHours({ onClose }) {
@@ -144,7 +144,7 @@ export default function LogHours({ onClose }) {
   );
 }
 
-function today() { return new Date().toISOString().split('T')[0]; }
+function today() { return localToday(); }
 
 const S = {
   overlay:    { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300, display: 'flex', alignItems: 'flex-end' },

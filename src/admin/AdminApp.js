@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { api, clearSession, getUser, formatDate } from '../api';
+import { api, clearSession, formatDate, localToday, localMonthStart, toInputDate, mileageDeduction } from '../api';
 import AdminLogin from './AdminLogin';
 import SheetGrid, { StatusBadge, DivisionBadge, CurrencyCell } from './SheetGrid';
 import { toast, ToastContainer, useToast } from '../components/Toast';
@@ -124,7 +124,8 @@ function CrudModal({ title, fields, values, onChange, onSave, onClose, saving, d
                 ) : field.type === 'textarea' ? (
                   <textarea value={values[field.key] ?? ''} onChange={e => onChange(field.key, e.target.value)} rows={3} />
                 ) : (
-                  <input type={field.type || 'text'} value={values[field.key] ?? ''}
+                  <input type={field.type || 'text'}
+                    value={field.type === 'date' ? toInputDate(values[field.key]) : (values[field.key] ?? '')}
                     onChange={e => onChange(field.key, e.target.value)}
                     placeholder={field.placeholder || ''} />
                 )}
@@ -236,9 +237,11 @@ function AdminInvoices() {
   useEffect(() => { api('getSettings').then(r => { if(r.status==='ok') setSettings(r.data); }); }, []);
 
   const markPaid = async () => {
+    setSaving(true);
     const r = await api('markPaid', {}, { InvoiceID: paidModal.InvoiceID, ...payForm });
     if (r.status==='ok') { toast('Marked as paid ✅'); reload(); setPaidModal(null); }
     else toast(r.message, 'error');
+    setSaving(false);
   };
 
   const emailInvoice = async (inv) => {
@@ -343,7 +346,7 @@ function AdminEstimates() {
     { key:'EstimateID',   label:'Estimate #',  width:120 },
     { key:'CustomerName', label:'Customer',    width:150 },
     { key:'Division',     label:'Division',    width:80,  render: DivisionBadge },
-    { key:'EstimateDate', label:'Date',        width:100 },
+    { key:'EstimateDate', label:'Date',        width:100, render: v => formatDate(v) },
     { key:'Total',        label:'Total',       width:100, render: CurrencyCell },
     { key:'Status',       label:'Status',      width:120, render: StatusBadge },
     { key:'_actions',     label:'Actions',     width:200, render: (_, row) => (
@@ -431,7 +434,7 @@ function AdminJobs() {
     { key:'CustomerName', label:'Customer',   width:150 },
     { key:'Division',     label:'Division',   width:80, render: DivisionBadge },
     { key:'Description',  label:'Description',width:200 },
-    { key:'JobDate',      label:'Date',       width:100 },
+    { key:'JobDate',      label:'Date',       width:100, render: v => formatDate(v) },
     { key:'Priority',     label:'Priority',   width:80, render: v => v==='Urgent' ? <span style={{background:'#fee2e2',color:'#991b1b',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>🔴 Urgent</span> : <span style={{background:'#f3f4f6',color:'#6b7280',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>Normal</span> },
     { key:'Status',       label:'Status',     width:110, render: StatusBadge },
   ];
@@ -514,7 +517,7 @@ function AdminExpenses() {
   const { data, loading } = useSheetData('getExpenses');
   const total = data.reduce((s,e) => s+(parseFloat(e.Amount)||0), 0);
   const cols = [
-    { key:'Date',        label:'Date',       width:100 },
+    { key:'Date',        label:'Date',       width:100, render: v => formatDate(v) },
     { key:'Category',    label:'Category',   width:130 },
     { key:'Division',    label:'Division',   width:80, render: DivisionBadge },
     { key:'Description', label:'Description',width:180 },
@@ -543,7 +546,7 @@ function AdminMileage() {
   const { data, loading } = useSheetData('getMileage');
   const totalMiles = data.reduce((s,m) => s+(parseFloat(m.TotalMiles)||0), 0);
   const cols = [
-    { key:'Date',       label:'Date',     width:100 },
+    { key:'Date',       label:'Date',     width:100, render: v => formatDate(v) },
     { key:'DriverName', label:'Driver',   width:120 },
     { key:'TruckName',  label:'Truck',    width:140 },
     { key:'Division',   label:'Division', width:80, render: DivisionBadge },
@@ -562,7 +565,7 @@ function AdminMileage() {
     <div>
       <div style={{display:'flex',gap:16,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
         <div style={{fontWeight:700}}>Total: <span style={{color:'#1a4a1a'}}>{totalMiles.toLocaleString()} miles</span></div>
-        <div style={{fontWeight:700}}>IRS deduction: <span style={{color:'#1d6fa4'}}>${(totalMiles*0.67).toFixed(2)}</span></div>
+        <div style={{fontWeight:700}}>IRS deduction: <span style={{color:'#1d6fa4'}}>${mileageDeduction(data).toFixed(2)}</span></div>
         <button className="admin-btn admin-btn-outline" onClick={exportCSV} style={{marginLeft:'auto'}}>⬇ Export CSV</button>
       </div>
       <SheetGrid data={data} columns={cols} emptyMessage="No mileage logged." />
@@ -581,7 +584,7 @@ function AdminHours() {
   const totalHours = data.reduce((s,h) => s+(parseFloat(h.TotalHours)||0), 0);
   const cols = [
     { key:'EmployeeName', label:'Employee',  width:130 },
-    { key:'Date',         label:'Date',      width:100 },
+    { key:'Date',         label:'Date',      width:100, render: v => formatDate(v) },
     { key:'ClockIn',      label:'Clock In',  width:150, render: v => v ? formatDate(v) + ' ' + new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '—' },
     { key:'ClockOut',     label:'Clock Out', width:150, render: v => v ? new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : <span className="admin-badge admin-badge-green">Active</span> },
     { key:'TotalHours',   label:'Hours',     width:80,  render: v => <strong>{v||'—'}</strong> },
@@ -621,7 +624,7 @@ function AdminLicenses() {
     { key:'HolderName',     label:'Holder',      width:140 },
     { key:'LicenseType',    label:'Type',        width:160 },
     { key:'LicenseNumber',  label:'Number',      width:130 },
-    { key:'ExpirationDate', label:'Expires',     width:100 },
+    { key:'ExpirationDate', label:'Expires',     width:100, render: v => formatDate(v) },
     { key:'DaysUntilExpiry',label:'Days Left',   width:90, render: v => {
       const n = parseInt(v);
       return <span className={`admin-badge ${n<0?'admin-badge-red':n<=30?'admin-badge-amber':'admin-badge-green'}`}>{n<0?'Expired':`${n}d`}</span>;
@@ -718,6 +721,8 @@ function AdminUsers() {
 
   const save = async () => {
     if (!form.Name) return toast('Name is required', 'error');
+    // The phone login screen auto-submits after 4 digits, so PINs must be exactly 4 digits
+    if ((modal==='add' || form.PIN) && !/^\d{4}$/.test(form.PIN||'')) return toast('PIN must be exactly 4 digits', 'error');
     setSaving(true);
     const r = await api(modal==='add'?'addUser':'updateUser', {}, form);
     if (r.status==='ok') { toast('User saved!'); reload(); setModal(null); }
@@ -758,7 +763,7 @@ function AdminUsers() {
                 <div className="admin-field admin-form-full"><label>Email</label><input value={form.Email||''} onChange={e=>f('Email',e.target.value)} /></div>
                 <div className="admin-field admin-form-full">
                   <label>PIN {modal==='edit'?'(enter new PIN to change)':'*'}</label>
-                  <input type="password" value={form.PIN||''} onChange={e=>f('PIN',e.target.value)} placeholder={modal==='edit'?'Leave blank to keep current':'4-8 digit PIN'} />
+                  <input type="password" value={form.PIN||''} onChange={e=>f('PIN',e.target.value)} placeholder={modal==='edit'?'Leave blank to keep current':'4-digit PIN'} inputMode="numeric" maxLength={4} />
                 </div>
               </div>
               <div style={{marginTop:12,padding:'10px 12px',background:'#dbeafe',borderRadius:8,fontSize:12,color:'#1e40af'}}>
@@ -776,5 +781,5 @@ function AdminUsers() {
   );
 }
 
-function today() { return new Date().toISOString().split('T')[0]; }
-function monthStart() { const d=new Date(); d.setDate(1); return d.toISOString().split('T')[0]; }
+function today() { return localToday(); }
+function monthStart() { return localMonthStart(); }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, localToday, formatDate } from '../api';
 import { toast } from './Toast';
 
 export default function NewEstimate({ onComplete, onCancel, prefillJobID = null }) {
@@ -60,7 +60,7 @@ export default function NewEstimate({ onComplete, onCancel, prefillJobID = null 
           <option value="">— Select a job —</option>
           {jobs.map(j => (
             <option key={j.JobID} value={j.JobID}>
-              {j.CustomerName} — {j.Description?.slice(0, 40)} ({j.JobDate})
+              {j.CustomerName} — {j.Description?.slice(0, 40)}{j.JobDate ? ` (${formatDate(j.JobDate)})` : ''}
             </option>
           ))}
         </select>
@@ -127,7 +127,7 @@ export default function NewEstimate({ onComplete, onCancel, prefillJobID = null 
   );
 }
 
-function today() { return new Date().toISOString().split('T')[0]; }
+function today() { return localToday(); }
 
 const S = {
   wrap:       { position: 'fixed', inset: 0, background: '#f0f4f0', zIndex: 250, display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' },
