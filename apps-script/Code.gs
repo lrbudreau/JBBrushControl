@@ -1,5 +1,5 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4.2
+// JB Brush Control — Google Apps Script Backend v4.3
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
@@ -257,7 +257,7 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4.2' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.3' });
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);
 
@@ -372,9 +372,78 @@ function handleGetSettings(token) {
 // AUTH / LOGIN
 // ============================================================
 
+// ── Login lockout ────────────────────────────────────────────
+// The API address is public and PINs are 4 digits, so without this anyone
+// could try all 10,000 PINs. After 5 wrong PINs within 15 minutes, PIN login
+// is locked for 30 minutes and the owner gets an email.
+// To unlock early: run unlockLogins() from the Apps Script editor.
+const LOGIN_MAX_FAILS   = 5;
+const LOGIN_WINDOW_MS   = 15 * 60 * 1000;
+const LOGIN_LOCK_MS     = 30 * 60 * 1000;
+
+function loginLockRemainingMs() {
+  const until = Number(PropertiesService.getScriptProperties().getProperty('login_lock_until') || 0);
+  return Math.max(0, until - Date.now());
+}
+
+function recordLoginFailure() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const now   = Date.now();
+    let first   = Number(props.getProperty('login_first_fail') || 0);
+    let fails   = Number(props.getProperty('login_fails') || 0);
+    if (!first || now - first > LOGIN_WINDOW_MS) { first = now; fails = 0; }
+    fails++;
+    if (fails >= LOGIN_MAX_FAILS) {
+      props.setProperty('login_lock_until', String(now + LOGIN_LOCK_MS));
+      props.deleteProperty('login_fails');
+      props.deleteProperty('login_first_fail');
+      notifyLoginLockout(fails);
+    } else {
+      props.setProperty('login_fails', String(fails));
+      props.setProperty('login_first_fail', String(first));
+    }
+  } finally { lock.releaseLock(); }
+}
+
+function clearLoginFailures() {
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty('login_fails');
+  props.deleteProperty('login_first_fail');
+}
+
+function notifyLoginLockout(fails) {
+  try {
+    const to = getSetting('Email');
+    if (!to) return;
+    const company = getSetting('CompanyName') || 'JB Brush Control';
+    GmailApp.sendEmail(to, '⚠️ ' + company + ': app login locked',
+      fails + ' wrong PINs were entered in the JB Brush Control app within 15 minutes, ' +
+      'so PIN login is locked for 30 minutes.\n\n' +
+      'If this was someone on your team mistyping, nothing else is needed — it unlocks by itself, ' +
+      'or run unlockLogins() in the Apps Script editor to unlock now.\n\n' +
+      'If this keeps happening and it wasn\'t your team, someone may be guessing PINs: ' +
+      'change everyone\'s PIN in the admin panel (Users).', { name: company });
+  } catch (e) { Logger.log('Lockout email failed: ' + e.message); }
+}
+
+// Run from the Apps Script editor to end a lockout early.
+function unlockLogins() {
+  PropertiesService.getScriptProperties().deleteProperty('login_lock_until');
+  clearLoginFailures();
+  Logger.log('Logins unlocked');
+}
+
 function handleLogin(body) {
   const { name, pin } = body;
   if (!pin) return err('PIN required');
+  const lockedMs = loginLockRemainingMs();
+  if (lockedMs > 0) {
+    const mins = Math.ceil(lockedMs / 60000);
+    return err('Too many wrong PINs. Login is locked — try again in ' + mins + ' minute' + (mins === 1 ? '' : 's') + '.', 429);
+  }
   const pinHash = hashPIN(pin);
   const users   = readSheet('Users');
   let user;
@@ -390,7 +459,8 @@ function handleLogin(body) {
       (u.Active === true || String(u.Active).toUpperCase() === 'TRUE')
     );
   }
-  if (!user) return err('Invalid PIN', 401);
+  if (!user) { recordLoginFailure(); return err('Invalid PIN', 401); }
+  clearLoginFailures();
   const token = Utilities.base64Encode(user.UserID + ':' + pinHash);
   return ok({ token, user: { UserID: user.UserID, Name: user.Name, Role: user.Role, Email: user.Email } });
 }
@@ -399,7 +469,8 @@ function handleLogin(body) {
 function handleVerifyAdminPIN(token, body) {
   const admin = requireRole(token, ['owner', 'admin']);
   const pinHash = hashPIN(body.pin);
-  if (String(admin.PIN) !== pinHash) return err('Incorrect PIN', 401);
+  if (loginLockRemainingMs() > 0) return err('Too many wrong PINs. Try again later.', 429);
+  if (String(admin.PIN) !== pinHash) { recordLoginFailure(); return err('Incorrect PIN', 401); }
   // Return the target user's plain PIN (only works if admin just verified)
   if (body.targetUserID) {
     const target = findRecord('Users', 'UserID', body.targetUserID);

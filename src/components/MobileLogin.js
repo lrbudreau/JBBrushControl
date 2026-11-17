@@ -80,7 +80,7 @@ export default function MobileLogin({ onLogin }) {
         completeLogin(r.data.token, r.data.user);
       }
     } else {
-      setError('Wrong PIN. Try again.');
+      setError(r.code === 429 ? r.message : r.code === 401 ? 'Wrong PIN. Try again.' : (r.message || 'Could not reach the server. Check your connection.'));
       setPin('');
     }
     setLoading(false);
