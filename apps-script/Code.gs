@@ -1,5 +1,5 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4.5
+// JB Brush Control — Google Apps Script Backend v4.6
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
@@ -221,6 +221,8 @@ function enrichEstimate(est) {
     CustomerPhone:  customer ? customer.Phone : '',
     CustomerAddress: customer ? [customer.Address, customer.City, customer.State, customer.Zip].filter(Boolean).join(', ') : '',
     JobDescription: job ? job.Description : '',
+    JobDate:        job ? job.JobDate : '',
+    JobStatus:      job ? job.Status : '',
     Division:       est.Division || (job ? job.Division : '')
   };
 }
@@ -257,7 +259,7 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4.5' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.6' });
       case 'batch':             return handleBatch(token, body);
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);

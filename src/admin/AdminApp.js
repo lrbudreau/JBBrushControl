@@ -50,6 +50,13 @@ export default function AdminApp() {
 
   const logout = () => { clearSession(); setUser(null); };
 
+  // Count of estimates ready to invoice, shown as a red badge in the sidebar
+  const [readyCount, setReadyCount] = useState(0);
+  useEffect(() => {
+    if (!user) return;
+    api('getEstimates').then(r => { if (r.status === 'ok') setReadyCount(r.data.filter(needsInvoice).length); });
+  }, [user, page]);
+
   if (!user) return <AdminLogin onLogin={u => setUser(u)} />;
 
   return (
@@ -64,6 +71,9 @@ export default function AdminApp() {
               ? <div key={i} className="admin-nav-section">{item.section}</div>
               : <button key={item.id} className={`admin-nav-item ${page===item.id?'active':''}`} onClick={() => setPage(item.id)}>
                   {item.icon} {item.label}
+                  {item.id === 'estimates' && readyCount > 0 && (
+                    <span title={`${readyCount} ready to invoice`} style={{ marginLeft:'auto', float:'right', background:'#dc2626', color:'white', borderRadius:99, fontSize:11, fontWeight:800, padding:'1px 7px' }}>{readyCount}</span>
+                  )}
                 </button>
           )}
         </div>
@@ -98,6 +108,14 @@ export default function AdminApp() {
       <ToastContainer toasts={toasts} />
     </div>
   );
+}
+
+// An accepted estimate whose job date is today/past (or has no date) is
+// ready to be turned into an invoice.
+export function needsInvoice(est) {
+  if (est.Status !== 'Accepted') return false;
+  const d = toInputDate(est.JobDate);
+  return !d || d <= localToday();
 }
 
 // ── Reusable CRUD modal ───────────────────────────────────────
@@ -199,6 +217,7 @@ function AdminDashboard() {
         <div className="admin-stat"><div className="admin-stat-label">Revenue · {month}</div><div className="admin-stat-value" style={{color:'#1a4a1a'}}>${(data.revenueThisMonth||0).toLocaleString()}</div></div>
         <div className="admin-stat amber"><div className="admin-stat-label">Outstanding</div><div className="admin-stat-value" style={{color:'#d97706'}}>${(data.outstandingTotal||0).toLocaleString()}</div><div className="admin-stat-sub">{data.outstandingInvoices||0} invoice(s)</div></div>
         <div className="admin-stat"><div className="admin-stat-label">Jobs · {month}</div><div className="admin-stat-value">{data.jobsThisMonth||0}</div></div>
+        <ReadyToInvoiceTile />
         <div className="admin-stat blue"><div className="admin-stat-label">Expenses · {month}</div><div className="admin-stat-value" style={{color:'#dc2626'}}>${(data.expensesThisMonth||0).toLocaleString()}</div></div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
@@ -222,6 +241,18 @@ function AdminDashboard() {
           }
         </div>
       </div>
+    </div>
+  );
+}
+
+function ReadyToInvoiceTile() {
+  const [n, setN] = useState(null);
+  useEffect(() => { api('getEstimates').then(r => { if (r.status==='ok') setN(r.data.filter(needsInvoice).length); }); }, []);
+  return (
+    <div className="admin-stat" style={n ? {background:'#fef2f2'} : {}}>
+      <div className="admin-stat-label">🧾 Ready to invoice</div>
+      <div className="admin-stat-value" style={{color: n ? '#dc2626' : '#6b7280'}}>{n ?? '…'}</div>
+      <div className="admin-stat-sub">{n ? 'See Estimates' : 'All caught up'}</div>
     </div>
   );
 }
@@ -335,6 +366,19 @@ function AdminEstimates() {
     else toast(r.message, 'error');
   };
 
+  // Set / change the job date right from this page
+  const [dateModal, setDateModal] = useState(null);   // { est, date }
+  const saveJobDate = async () => {
+    setSaving(true);
+    const r = await api('updateJob', {}, { JobID: dateModal.est.JobID, JobDate: dateModal.date });
+    setSaving(false);
+    if (r.status==='ok') { toast('Job date saved ✅'); reload(); setDateModal(null); }
+    else toast(r.message, 'error');
+  };
+
+  const readyRows = data.filter(needsInvoice);
+  const [onlyReady, setOnlyReady] = useState(false);
+
   const convert = async (est) => {
     if (!window.confirm(`Convert ${est.EstimateID} to invoice?`)) return;
     const r = await api('convertToInvoice', {}, { EstimateID: est.EstimateID });
@@ -346,16 +390,31 @@ function AdminEstimates() {
     { key:'EstimateID',   label:'Estimate #',  width:120 },
     { key:'CustomerName', label:'Customer',    width:150 },
     { key:'Division',     label:'Division',    width:80,  render: DivisionBadge },
-    { key:'EstimateDate', label:'Date',        width:100, render: v => formatDate(v) },
+    { key:'EstimateDate', label:'Estimate Date', width:110, render: v => formatDate(v) },
+    { key:'JobDate',      label:'Job Date',    width:120, render: (v, row) => {
+      if (['Rejected','Superseded'].includes(row.Status)) return formatDate(v);
+      return (
+        <button className="admin-btn admin-btn-outline admin-btn-sm" title="Set the job date"
+          onClick={e=>{e.stopPropagation();setDateModal({ est: row, date: toInputDate(v) || today() });}}>
+          {v ? '📅 ' + formatDate(v) : '+ Set date'}
+        </button>
+      );
+    }},
     { key:'Total',        label:'Total',       width:100, render: CurrencyCell },
-    { key:'Status',       label:'Status',      width:120, render: StatusBadge },
+    { key:'Status',       label:'Status',      width:120, render: (v, row) => (
+      <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-start'}}>
+        {StatusBadge(v === 'Invoice' ? 'Invoiced' : v)}
+        {needsInvoice(row) && <span className="admin-badge admin-badge-red" title="Job date has arrived — create the invoice">🧾 Ready to invoice</span>}
+        {row.Status === 'Accepted' && !needsInvoice(row) && <span style={{fontSize:11,color:'#6b7280'}}>Scheduled</span>}
+      </div>
+    )},
     { key:'_actions',     label:'Actions',     width:200, render: (_, row) => (
       <div style={{display:'flex',gap:4}}>
         {row.Status === 'Pending' && <>
           <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();setSel(row);setModal('accept');}}>✅ Accept</button>
           <button className="admin-btn admin-btn-danger admin-btn-sm" onClick={e=>{e.stopPropagation();reject(row);}}>✕</button>
         </>}
-        {row.Status === 'Accepted' && <button className="admin-btn admin-btn-primary admin-btn-sm" onClick={e=>{e.stopPropagation();convert(row);}}>→ Invoice</button>}
+        {row.Status === 'Accepted' && <button className="admin-btn admin-btn-primary admin-btn-sm" style={needsInvoice(row)?{background:'#dc2626'}:{}} onClick={e=>{e.stopPropagation();convert(row);}}>🧾 Create Invoice</button>}
       </div>
     )},
   ];
@@ -363,7 +422,31 @@ function AdminEstimates() {
   if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
   return (
     <div>
-      <SheetGrid data={data} columns={cols} emptyMessage="No estimates yet." />
+      {readyRows.length > 0 && (
+        <div style={{display:'flex',alignItems:'center',gap:12,background:'#fef2f2',border:'1.5px solid #fecaca',borderRadius:10,padding:'10px 14px',marginBottom:12}}>
+          <span style={{fontSize:20}}>🧾</span>
+          <div style={{flex:1}}><strong>{readyRows.length} estimate{readyRows.length>1?'s':''} ready to invoice</strong>
+            <div style={{fontSize:12,color:'#6b7280'}}>Accepted, and the job date has arrived (or no date is set).</div></div>
+          <button className="admin-btn admin-btn-outline admin-btn-sm" onClick={()=>setOnlyReady(v=>!v)}>{onlyReady ? 'Show all' : 'Show only these'}</button>
+        </div>
+      )}
+      <SheetGrid data={onlyReady ? readyRows : data} columns={cols} emptyMessage="No estimates yet."
+        rowStyle={row => needsInvoice(row) ? { background:'#fff7f7', boxShadow:'inset 4px 0 0 #dc2626' } : {}} />
+      {dateModal && (
+        <div className="admin-modal-overlay" onClick={e=>e.target===e.currentTarget&&setDateModal(null)}>
+          <div className="admin-modal">
+            <div className="admin-modal-header"><h3>Job Date</h3><button className="admin-btn admin-btn-outline admin-btn-sm" onClick={()=>setDateModal(null)}>✕</button></div>
+            <div className="admin-modal-body">
+              <p style={{marginBottom:12}}>{dateModal.est.EstimateID} · {dateModal.est.CustomerName} · {dateModal.est.JobDescription}</p>
+              <div className="admin-field"><label>Job date</label><input type="date" value={dateModal.date} onChange={e=>setDateModal(m=>({...m,date:e.target.value}))} /></div>
+            </div>
+            <div className="admin-modal-footer">
+              <button className="admin-btn admin-btn-outline" onClick={()=>setDateModal(null)}>Cancel</button>
+              <button className="admin-btn admin-btn-primary" onClick={saveJobDate} disabled={saving||!dateModal.date}>{saving?'Saving…':'Save date'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal === 'accept' && selected && (
         <div className="admin-modal-overlay" onClick={e=>e.target===e.currentTarget&&setModal(null)}>
           <div className="admin-modal">
@@ -434,7 +517,7 @@ function AdminJobs() {
     { key:'CustomerName', label:'Customer',   width:150 },
     { key:'Division',     label:'Division',   width:80, render: DivisionBadge },
     { key:'Description',  label:'Description',width:200 },
-    { key:'JobDate',      label:'Date',       width:100, render: v => formatDate(v) },
+    { key:'JobDate',      label:'Job Date',   width:100, render: v => formatDate(v) },
     { key:'Priority',     label:'Priority',   width:80, render: v => v==='Urgent' ? <span style={{background:'#fee2e2',color:'#991b1b',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>🔴 Urgent</span> : <span style={{background:'#f3f4f6',color:'#6b7280',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:700}}>Normal</span> },
     { key:'Status',       label:'Status',     width:110, render: StatusBadge },
   ];

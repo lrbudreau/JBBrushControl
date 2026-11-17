@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 
 // Generic spreadsheet-style grid
-export default function SheetGrid({ data, columns, onRowClick, actions, emptyMessage = 'No data.' }) {
+export default function SheetGrid({ data, columns, onRowClick, actions, rowStyle, emptyMessage = 'No data.' }) {
   const [sortCol, setSortCol]   = useState(null);
   const [sortDir, setSortDir]   = useState('asc');
   const [search, setSearch]     = useState('');
@@ -65,7 +65,7 @@ export default function SheetGrid({ data, columns, onRowClick, actions, emptyMes
             {paged.length === 0 ? (
               <tr><td colSpan={columns.length + 1} style={{ textAlign:'center', padding:'32px', color:'#9ca3af' }}>{emptyMessage}</td></tr>
             ) : paged.map((row, i) => (
-              <tr key={i} style={{ cursor: onRowClick ? 'pointer' : 'default' }} onClick={() => onRowClick && onRowClick(row)}>
+              <tr key={i} style={{ cursor: onRowClick ? 'pointer' : 'default', ...(rowStyle ? rowStyle(row) : {}) }} onClick={() => onRowClick && onRowClick(row)}>
                 {columns.map(col => (
                   <td key={col.key} title={String(row[col.key] ?? '')}>
                     {col.render ? col.render(row[col.key], row) : String(row[col.key] ?? '')}
@@ -96,7 +96,7 @@ export const StatusBadge = (status) => {
     Draft:'gray', Sent:'blue', Paid:'green', Overdue:'red', Void:'gray',
     Scheduled:'amber', 'In Progress':'green', Complete:'gray', Invoiced:'gray', Quoted:'blue',
     Active:'green', Inactive:'gray', TRUE:'green', FALSE:'gray',
-    Initial:'blue', Revised:'amber', Converted:'green', Superseded:'gray', Approved:'green',
+    Initial:'blue', Revised:'amber', Pending:'blue', Accepted:'green', Rejected:'red', Invoice:'gray', 'Awaiting Payment':'amber', Estimate:'blue', Finished:'gray', Canceled:'red', Converted:'green', Superseded:'gray', Approved:'green',
   };
   const color = map[status] || 'gray';
   return <span className={`admin-badge admin-badge-${color}`}>{status}</span>;
