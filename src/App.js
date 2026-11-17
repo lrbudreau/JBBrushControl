@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { getSession, clearSession, getUser } from './api';
 import { useToast, ToastContainer } from './components/Toast';
 import MobileLogin  from './components/MobileLogin';
+import Register     from './components/Register';
 import MobileHome   from './components/MobileHome';
 import AdminApp     from './admin/AdminApp';
 import { MobileMileage, MobileJobs, MobileExpenses } from './pages/MobilePages';
@@ -30,6 +31,14 @@ function MobileApp() {
   const [user, setUser] = useState(null);
   const [page, setPage] = useState('home');
   const { toasts }      = useToast();
+  // Invite link: …/JBBrushControl/?invite=CODE
+  const [invite, setInvite] = useState(() => new URLSearchParams(window.location.search).get('invite'));
+  const clearInvite = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('invite');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    setInvite(null);
+  };
 
   useEffect(() => {
     const session = getSession();
@@ -37,6 +46,10 @@ function MobileApp() {
   }, []);
 
   const logout = () => { clearSession(); setUser(null); setPage('home'); };
+
+  if (invite) return <Register code={invite}
+    onDone={u => { clearInvite(); setUser(u); setPage('home'); }}
+    onCancel={clearInvite} />;
 
   if (!user) return <MobileLogin onLogin={u => { setUser(u); setPage('home'); }} />;
 

@@ -1,5 +1,5 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4.4
+// JB Brush Control — Google Apps Script Backend v4.6
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
@@ -221,6 +221,8 @@ function enrichEstimate(est) {
     CustomerPhone:  customer ? customer.Phone : '',
     CustomerAddress: customer ? [customer.Address, customer.City, customer.State, customer.Zip].filter(Boolean).join(', ') : '',
     JobDescription: job ? job.Description : '',
+    JobDate:        job ? job.JobDate : '',
+    JobStatus:      job ? job.Status : '',
     Division:       est.Division || (job ? job.Division : '')
   };
 }
@@ -257,7 +259,7 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4.4' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.6' });
       case 'batch':             return handleBatch(token, body);
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);
@@ -268,6 +270,13 @@ function handleRequest(e) {
       case 'updateUser':        return handleUpdateUser(token, body);
       case 'deleteUser':        return handleDeleteUser(token, body);
       case 'verifyAdminPIN':    return handleVerifyAdminPIN(token, body);
+
+      // Invites (register link)
+      case 'createInvite':      return handleCreateInvite(token, body);
+      case 'getInvites':        return handleGetInvites(token);
+      case 'cancelInvite':      return handleCancelInvite(token, body);
+      case 'checkInvite':       return handleCheckInvite(body.code || params.code);
+      case 'registerWithInvite':return handleRegisterWithInvite(body);
 
       // Hours
       case 'clockIn':           return handleClockIn(token, body);
@@ -550,6 +559,105 @@ function handleDeleteUser(token, body) {
   requireRole(token, ['owner', 'admin']);
   return updateRecord('Users', 'UserID', body.UserID, { Active: false })
     ? ok({ message: 'User deactivated' }) : err('User not found', 404);
+}
+
+// ============================================================
+// INVITES — an owner/admin creates a one-time link; the new person opens it,
+// enters their name and picks a PIN. Links expire after 7 days. Stored in
+// Script Properties (Project Settings → Script Properties), not the sheet.
+// ============================================================
+
+const INVITE_DAYS     = 7;
+const INVITE_MAX_TAKEN = 5;   // wrong "PIN already taken" tries before the link stops working
+
+function inviteKey(code) { return 'invite_' + String(code || '').replace(/[^A-Za-z0-9]/g, ''); }
+
+function readInvite(code) {
+  const raw = PropertiesService.getScriptProperties().getProperty(inviteKey(code));
+  if (!raw) return null;
+  const inv = JSON.parse(raw);
+  if (Date.now() > inv.expires) { PropertiesService.getScriptProperties().deleteProperty(inviteKey(code)); return null; }
+  return inv;
+}
+
+function handleCreateInvite(token, body) {
+  const admin = requireRole(token, ['owner', 'admin']);
+  const role  = ['employee', 'admin', 'owner'].includes(body.Role) ? body.Role : 'employee';
+  if (role === 'owner' && admin.Role !== 'owner') return err('Only an owner can invite another owner', 403);
+  const code = Utilities.getUuid().replace(/-/g, '');
+  const inv  = {
+    code: code, role: role, name: String(body.Name || '').trim(),
+    createdBy: admin.Name, created: Date.now(), expires: Date.now() + INVITE_DAYS * 86400000, taken: 0
+  };
+  PropertiesService.getScriptProperties().setProperty(inviteKey(code), JSON.stringify(inv));
+  return ok({ code: code, role: role, name: inv.name, expires: new Date(inv.expires).toISOString() });
+}
+
+function handleGetInvites(token) {
+  requireRole(token, ['owner', 'admin']);
+  const props = PropertiesService.getScriptProperties();
+  const all   = props.getProperties();
+  const list  = [];
+  Object.keys(all).forEach(k => {
+    if (k.indexOf('invite_') !== 0) return;
+    const inv = JSON.parse(all[k]);
+    if (Date.now() > inv.expires) { props.deleteProperty(k); return; }
+    list.push({ code: inv.code, role: inv.role, name: inv.name, createdBy: inv.createdBy,
+                created: new Date(inv.created).toISOString(), expires: new Date(inv.expires).toISOString() });
+  });
+  list.sort((a, b) => a.created < b.created ? 1 : -1);
+  return ok(list);
+}
+
+function handleCancelInvite(token, body) {
+  requireRole(token, ['owner', 'admin']);
+  PropertiesService.getScriptProperties().deleteProperty(inviteKey(body.code));
+  return ok({ message: 'Invite canceled' });
+}
+
+// Public: lets the register page say "You've been invited as an employee"
+function handleCheckInvite(code) {
+  const inv = readInvite(code);
+  if (!inv) return err('This invite link is no longer valid. Ask for a new one.', 404);
+  return ok({ role: inv.role, name: inv.name, createdBy: inv.createdBy });
+}
+
+// Public: create the account from an invite, and log them in
+function handleRegisterWithInvite(body) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const inv = readInvite(body.code);
+    if (!inv) return err('This invite link is no longer valid. Ask for a new one.', 404);
+    const name = String(body.Name || '').trim();
+    const pin  = String(body.PIN || '');
+    if (!name) return err('Please enter your name');
+    if (!/^\d{4}$/.test(pin)) return err('PIN must be exactly 4 digits');
+
+    const pinHash = hashPIN(pin);
+    const users   = readSheet('Users');
+    const taken   = users.some(u => String(u.PIN) === pinHash && (u.Active === true || String(u.Active).toUpperCase() === 'TRUE'));
+    if (taken) {
+      // Limit tries so an invite can't be used to discover other people's PINs
+      inv.taken = (inv.taken || 0) + 1;
+      const props = PropertiesService.getScriptProperties();
+      if (inv.taken >= INVITE_MAX_TAKEN) {
+        props.deleteProperty(inviteKey(body.code));
+        return err('Too many tries. This invite link no longer works — ask for a new one.', 429);
+      }
+      props.setProperty(inviteKey(body.code), JSON.stringify(inv));
+      return err('That PIN is already taken. Please pick a different one.', 409);
+    }
+
+    const user = {
+      UserID: generateID('USR'), Name: name, Email: String(body.Email || '').trim(),
+      PIN: pinHash, Role: inv.role, Active: true, CreatedDate: today()
+    };
+    appendRow('Users', user);
+    PropertiesService.getScriptProperties().deleteProperty(inviteKey(body.code));   // one use only
+    const token = Utilities.base64Encode(user.UserID + ':' + pinHash);
+    return ok({ token: token, user: { UserID: user.UserID, Name: user.Name, Role: user.Role, Email: user.Email } });
+  } finally { lock.releaseLock(); }
 }
 
 // ============================================================
