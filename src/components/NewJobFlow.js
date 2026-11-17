@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { api } from '../api';
 import { lookupParcelByAddress } from '../hooks/useGIS';
-import { getJobFolder, uploadPhoto, requestDriveAccess } from '../hooks/useDrive';
+import { uploadPhotos } from '../hooks/usePhotos';
 import { toast } from './Toast';
 
 const STEPS = ['Address', 'Customer', 'Job Details', 'Estimate', 'Photos', 'Review'];
@@ -10,6 +10,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
   const [step, setStep]       = useState(0);
   const [saving, setSaving]   = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
 
   // GIS lookup
   const [addressInput, setAddressInput] = useState('');
@@ -84,11 +85,6 @@ export default function NewJobFlow({ onComplete, onCancel }) {
 
   const submit = async () => {
     setSaving(true);
-    // Start Google sign-in NOW, while we're still inside the tap. If we wait
-    // until after the customer/job are saved, iPhone Safari blocks the popup
-    // and the upload just hangs until the 30s timeout.
-    const driveAuth = photos.length > 0 ? requestDriveAccess() : null;
-    if (driveAuth) driveAuth.catch(() => {}); // handled below
     try {
       // 1. Add customer
       const cusRes = await api('addCustomer', {}, { ...customer, Division: customer.Division });
@@ -107,47 +103,15 @@ export default function NewJobFlow({ onComplete, onCancel }) {
       if (jobRes.status !== 'ok') { toast('Failed to save job', 'error'); setSaving(false); return; }
       const jobID = jobRes.data.JobID;
 
-      // 3. Upload photos to Drive and log to Photos sheet
-      console.log('Photos to upload:', photos.length, photos.map(p => p.file?.name));
+      // 3. Upload photos (through the backend, into the business Google Drive)
+      let photoMsg = '';
       if (photos.length > 0) {
         setUploading(true);
-        try {
-          const drivePromise = (async () => {
-            await driveAuth;
-            const { folderId, folderUrl } = await getJobFolder(jobID, customer.Name);
-            for (const photo of photos) {
-              const result = await uploadPhoto(photo.file, folderId);
-              if (result.id) {
-                // Log each photo to the Photos sheet
-                await api('addPhoto', {}, {
-                  JobID:        jobID,
-                  FileName:     result.name || photo.file.name,
-                  DriveFileID:  result.id,
-                  DriveUrl:     result.webViewLink || `https://drive.google.com/file/d/${result.id}/view`,
-                  ThumbnailUrl: result.thumbnailLink || '',
-                });
-              }
-            }
-            // Update job notes with folder link
-            await api('updateJob', {}, {
-              JobID: jobID,
-              Notes: (job.Notes ? job.Notes + '\n' : '') + `Photos: ${folderUrl}`
-            });
-          })();
-          const timeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 30000)
-          );
-          await Promise.race([drivePromise, timeout]);
-          toast(`${photos.length} photo(s) uploaded ✅`);
-        } catch (e) {
-          console.error('Photo upload error:', e);
-          if (e.message === 'timeout') {
-            toast('Photos timed out — job saved, try uploading photos again', 'info');
-          } else {
-            toast('Photo upload failed: ' + e.message, 'error');
-          }
-        }
+        const { done, failed } = await uploadPhotos(photos.map(p => p.file), jobID,
+          (n, total) => setUploadProgress(`${n} of ${total}`));
         setUploading(false);
+        photoMsg = failed === 0 ? ` ${done} photo(s) uploaded.`
+          : ` ${failed} photo(s) didn't upload — open the job and add them again.`;
       }
 
       // 4. Create estimate if any line items have a description
@@ -164,7 +128,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
         }
       }
 
-      toast(`Job created! ${photos.length > 0 ? `${photos.length} photo(s) uploaded.` : ''}`);
+      toast(`Job created!${photoMsg}`, photoMsg.includes("didn't") ? 'error' : 'success');
       onComplete({ jobID, customerID });
     } catch (e) {
       toast('Something went wrong: ' + e.message, 'error');
@@ -397,7 +361,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
               </div>
             )}
             <button style={{ ...S.submitBtn, opacity: saving ? 0.6 : 1 }} onClick={submit} disabled={saving}>
-              {saving ? (uploading ? 'Uploading photos…' : 'Saving…') : '✅ Create Job'}
+              {saving ? (uploading ? `Uploading photos… ${uploadProgress}` : 'Saving…') : '✅ Create Job'}
             </button>
           </div>
         )}

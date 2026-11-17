@@ -367,7 +367,7 @@ export default function JobDetail({ jobID, onBack }) {
       )}
 
       {showPhotos && (
-        <PhotoViewer jobID={jobID} customerName={job.CustomerName || ''} folderUrl={folderUrl} onClose={() => setShowPhotos(false)} />
+        <PhotoViewer jobID={jobID} folderUrl={folderUrl} onClose={() => setShowPhotos(false)} />
       )}
     </div>
   );
