@@ -3,7 +3,7 @@ import { api, formatDate } from '../api';
 import { getJobFolder, uploadPhoto, requestDriveAccess } from '../hooks/useDrive';
 import { toast } from './Toast';
 
-export default function PhotoViewer({ jobID, folderUrl, onClose }) {
+export default function PhotoViewer({ jobID, customerName = '', folderUrl, onClose }) {
   const [photos, setPhotos]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState(null);
@@ -25,7 +25,9 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
     setUploading(true);
     try {
       await requestDriveAccess();
-      const { folderId, folderUrl: fUrl } = await getJobFolder(jobID, '');
+      // Use the same folder name NewJobFlow created ("JOB-ID — Customer"),
+      // otherwise added photos land in a second, separate folder.
+      const { folderId } = await getJobFolder(jobID, customerName);
       for (const file of files) {
         const result = await uploadPhoto(file, folderId);
         if (result.id) {
@@ -49,6 +51,12 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
     e.target.value = ''; // Reset input
   };
 
+  // Get Google sign-in done during the tap, before the file picker opens
+  const pickFiles = () => {
+    requestDriveAccess().catch(err => toast(err.message, 'error'));
+    fileRef.current.click();
+  };
+
   return (
     <div style={S.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={S.sheet}>
@@ -61,7 +69,7 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
               style={{ display:'none' }} onChange={handleFileSelect} />
             <button
               style={S.uploadBtn}
-              onClick={() => fileRef.current.click()}
+              onClick={pickFiles}
               disabled={uploading}>
               {uploading ? '⏳ Uploading…' : '+ Add Photos'}
             </button>
@@ -77,7 +85,7 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
               <div style={{ fontSize:40, marginBottom:10 }}>📷</div>
               <p>No photos yet.</p>
               <button style={{ ...S.uploadBtn, marginTop:14, padding:'10px 20px' }}
-                onClick={() => fileRef.current.click()} disabled={uploading}>
+                onClick={pickFiles} disabled={uploading}>
                 {uploading ? '⏳ Uploading…' : '+ Add First Photo'}
               </button>
             </div>

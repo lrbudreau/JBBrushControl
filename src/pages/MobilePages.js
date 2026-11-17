@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import PhotoViewer from '../components/PhotoViewer';
 import JobDetail from '../components/JobDetail';
-import { api } from '../api';
+import { api, localToday, formatDate, irsMileageRate, mileageDeduction } from '../api';
 import { toast } from '../components/Toast';
+import { getJobFolder, uploadPhoto, requestDriveAccess } from '../hooks/useDrive';
 
 // ── Mileage Page ─────────────────────────────────────────────
 export function MobileMileage() {
@@ -53,7 +54,7 @@ export function MobileMileage() {
     <div className="page-pad">
       <div className="stats-row">
         <div className="stat"><div className="stat-label">Total miles</div><div className="stat-value">{totalMiles.toLocaleString()}</div></div>
-        <div className="stat blue"><div className="stat-label">IRS deduction</div><div className="stat-value">${(totalMiles*0.67).toFixed(0)}</div></div>
+        <div className="stat blue"><div className="stat-label">IRS deduction</div><div className="stat-value">${mileageDeduction(mileage).toFixed(0)}</div></div>
       </div>
 
       <button style={bigBtnStyle('#1a4a1a')} onClick={() => setModal(true)}>
@@ -69,7 +70,7 @@ export function MobileMileage() {
             <div key={m.MileageID} className="list-item">
               <div className="list-item-main">
                 <div className="list-item-title">{m.TruckName || m.EquipmentID}</div>
-                <div className="list-item-sub">{m.Date} · {m.Purpose || '—'}</div>
+                <div className="list-item-sub">{formatDate(m.Date)} · {m.Purpose || '—'}</div>
               </div>
               <div style={{ textAlign:'right' }}>
                 <div style={{ fontWeight:700, color:'#1a4a1a' }}>{m.TotalMiles} mi</div>
@@ -131,7 +132,7 @@ export function MobileJobs() {
   const [viewPhotos, setViewPhotos] = useState(null);
   const [selectedJobID, setSelectedJobID] = useState(null);
 
-  useEffect(() => {
+  const loadJobs = () => {
     api('getJobs').then(r => {
       if (r.status==='ok') {
         // Filter out Canceled and Finished for My Jobs view
@@ -146,7 +147,9 @@ export function MobileJobs() {
       }
       setLoading(false);
     });
-  }, []);
+  };
+
+  useEffect(() => { loadJobs(); }, []);
 
   const STATUS_COLOR = { Scheduled:'#d97706', 'In Progress':'#2d6a2d', Complete:'#6b7280', Quoted:'#1d6fa4', Invoiced:'#6b7280' };
   const visible = jobs.filter(j => filter==='All' || j.Division===filter);
@@ -197,7 +200,7 @@ export function MobileJobs() {
       {selectedJobID && (
         <JobDetail
           jobID={selectedJobID}
-          onBack={() => setSelectedJobID(null)}
+          onBack={() => { setSelectedJobID(null); loadJobs(); }}
         />
       )}
     </div>
@@ -213,6 +216,7 @@ export function MobileExpenses() {
   const [modal, setModal]     = useState(false);
   const [saving, setSaving]   = useState(false);
   const [receipt, setReceipt] = useState(null);
+  const [otherVendor, setOtherVendor] = useState(false);
   const fileRef = React.useRef();
   const [form, setForm] = useState({ Date: today(), Category:'Fuel', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' });
 
@@ -233,13 +237,15 @@ export function MobileExpenses() {
   const save = async () => {
     if (!form.Amount) return toast('Enter an amount', 'error');
     setSaving(true);
+    // Start Google sign-in during the tap so iPhone Safari allows the popup
+    const driveAuth = receipt ? requestDriveAccess() : null;
+    if (driveAuth) driveAuth.catch(() => {});
     let receiptFileID = '', receiptUrl = '';
     // Upload receipt photo if selected
     if (receipt) {
       try {
-        const { getJobFolder, uploadPhoto, requestDriveAccess } = await import('../hooks/useDrive');
-        await requestDriveAccess();
-        const rootFolder = await import('../hooks/useDrive').then(m => m.getJobFolder('Receipts', 'Expenses'));
+        await driveAuth;
+        const rootFolder = await getJobFolder('Receipts', 'Expenses');
         const result = await uploadPhoto(receipt, rootFolder.folderId);
         if (result.id) {
           receiptFileID = result.id;
@@ -252,6 +258,7 @@ export function MobileExpenses() {
       toast('Expense logged!');
       setModal(false);
       setReceipt(null);
+      setOtherVendor(false);
       setForm({ Date: today(), Category:'Fuel', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' });
     } else toast(r.message, 'error');
     setSaving(false);
@@ -283,11 +290,16 @@ export function MobileExpenses() {
               </div>
               <div className="form-group"><label>Amount ($) *</label><input type="number" name="Amount" value={form.Amount} onChange={f} inputMode="decimal" step="0.01" placeholder="0.00" /></div>
               <div className="form-group"><label>Vendor</label>
-                <select name="Vendor" value={form.Vendor} onChange={f}>
-                  <option value="">— Select or type —</option>
+                <select value={otherVendor ? '__other' : form.Vendor}
+                  onChange={e => {
+                    if (e.target.value === '__other') { setOtherVendor(true); setForm(p => ({ ...p, Vendor:'' })); }
+                    else { setOtherVendor(false); f(e); }
+                  }} name="Vendor">
+                  <option value="">— Select —</option>
                   {vendors.map(v => <option key={v.VendorID} value={v.Name}>{v.Name}</option>)}
+                  <option value="__other">Other (type it in)…</option>
                 </select>
-                {!vendors.find(v => v.Name === form.Vendor) && form.Vendor && (
+                {otherVendor && (
                   <input name="Vendor" value={form.Vendor} onChange={f} placeholder="Or type vendor name" style={{ marginTop:6, width:'100%', minHeight:46, padding:'10px 12px', border:'2px solid #d1d5db', borderRadius:8, fontSize:15 }} />
                 )}
               </div>
@@ -316,7 +328,7 @@ export function MobileExpenses() {
   );
 }
 
-function today() { return new Date().toISOString().split('T')[0]; }
+function today() { return localToday(); }
 function bigBtnStyle(bg) {
   return { display:'flex', alignItems:'center', gap:14, width:'100%', minHeight:72, padding:'16px 20px', borderRadius:14, border:'none', background:bg, color:'white', cursor:'pointer', marginBottom:14, WebkitTapHighlightColor:'transparent' };
 }

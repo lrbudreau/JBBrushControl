@@ -84,6 +84,11 @@ export default function NewJobFlow({ onComplete, onCancel }) {
 
   const submit = async () => {
     setSaving(true);
+    // Start Google sign-in NOW, while we're still inside the tap. If we wait
+    // until after the customer/job are saved, iPhone Safari blocks the popup
+    // and the upload just hangs until the 30s timeout.
+    const driveAuth = photos.length > 0 ? requestDriveAccess() : null;
+    if (driveAuth) driveAuth.catch(() => {}); // handled below
     try {
       // 1. Add customer
       const cusRes = await api('addCustomer', {}, { ...customer, Division: customer.Division });
@@ -108,7 +113,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
         setUploading(true);
         try {
           const drivePromise = (async () => {
-            await requestDriveAccess();
+            await driveAuth;
             const { folderId, folderUrl } = await getJobFolder(jobID, customer.Name);
             for (const photo of photos) {
               const result = await uploadPhoto(photo.file, folderId);
@@ -376,8 +381,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
             <div style={S.reviewCard}>
               <div style={S.reviewLabel}>Job · <span style={{ background: customer.Division==='Spray'?'#dcfce7':'#fef9c3', color: customer.Division==='Spray'?'#166534':'#854d0e', padding:'1px 8px', borderRadius:99, fontSize:11, fontWeight:700 }}>{customer.Division}</span></div>
               <div style={S.reviewValue}>{job.Description || '—'}</div>
-              <div style={S.reviewSub}>{job.JobDate}</div>
-            </div>
+                          </div>
             {subtotal > 0 && (
               <div style={S.reviewCard}>
                 <div style={S.reviewLabel}>Estimate</div>

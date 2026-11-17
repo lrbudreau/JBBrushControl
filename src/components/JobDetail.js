@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, formatDate } from '../api';
+import { api, formatDate, localToday } from '../api';
 import { toast } from './Toast';
 import PhotoViewer from './PhotoViewer';
 import { downloadInvoicePDF } from './InvoicePDF';
@@ -15,6 +15,7 @@ export default function JobDetail({ jobID, onBack }) {
   const [saving, setSaving]     = useState(false);
 
   const [dueDate, setDueDate]   = useState('');
+  const [jobDate, setJobDate]   = useState(today());
   const [paidModal, setPaidModal] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('');
   const [paymentNotes, setPaymentNotes]   = useState('');
@@ -43,7 +44,7 @@ export default function JobDetail({ jobID, onBack }) {
   // Accept estimate → prompt for job date → schedule job
   const acceptEstimate = async (est) => {
     setSaving(true);
-    const r = await api('acceptEstimate', {}, { EstimateID: est.EstimateID });
+    const r = await api('acceptEstimate', {}, { EstimateID: est.EstimateID, JobDate: jobDate });
     if (r.status === 'ok') { toast('Estimate accepted — job scheduled! ✅'); load(); setModal(null); }
     else toast(r.message, 'error');
     setSaving(false);
@@ -129,7 +130,7 @@ export default function JobDetail({ jobID, onBack }) {
         <button style={S.backBtn} onClick={onBack}>←</button>
         <div>
           <div style={S.headerTitle}>{job.CustomerName || 'Job'}</div>
-          <div style={S.headerSub}>{job.JobDate || 'No date set'}</div>
+          <div style={S.headerSub}>{job.JobDate ? formatDate(job.JobDate) : 'No date set'}</div>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
           <span style={statusPill(job.Status)}>{job.Status}</span>
@@ -146,7 +147,7 @@ export default function JobDetail({ jobID, onBack }) {
           <div style={S.infoRow}><span style={S.infoKey}>Division</span>
             <span style={job.Division==='Spray'?S.spray:S.tree}>{job.Division}</span>
           </div>
-          {job.JobDate && <div style={S.infoRow}><span style={S.infoKey}>Date</span><span>{job.JobDate}</span></div>}
+          {job.JobDate && <div style={S.infoRow}><span style={S.infoKey}>Date</span><span>{formatDate(job.JobDate)}</span></div>}
           {job.Description && <div style={{ marginTop:8, fontSize:14, color:'#374151', lineHeight:1.5 }}>{job.Description}</div>}
         </div>
 
@@ -168,7 +169,7 @@ export default function JobDetail({ jobID, onBack }) {
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
                   <div>
                     <div style={{ fontWeight:700, fontSize:15 }}>{est.EstimateID}</div>
-                    <div style={{ fontSize:12, color:'#6b7280' }}>{est.EstimateDate} · {est.Version}</div>
+                    <div style={{ fontSize:12, color:'#6b7280' }}>{formatDate(est.EstimateDate)} · {est.Version}</div>
                   </div>
                   <div style={{ textAlign:'right' }}>
                     <div style={{ fontWeight:800, fontSize:18, color:'#1a4a1a' }}>${parseFloat(est.Total||0).toFixed(2)}</div>
@@ -283,6 +284,8 @@ export default function JobDetail({ jobID, onBack }) {
               <div style={{ fontSize:14, color:'#374151', lineHeight:1.6 }}>
                 Accepting this estimate will move the job to <strong>Scheduled</strong> status.
               </div>
+              <div style={S.label}>Schedule job date</div>
+              <input type="date" style={S.input} value={jobDate} onChange={e => setJobDate(e.target.value)} />
             </div>
             <div style={S.modalFooter}>
               <button style={S.cancelBtn} onClick={() => setModal(null)}>Cancel</button>
@@ -364,13 +367,13 @@ export default function JobDetail({ jobID, onBack }) {
       )}
 
       {showPhotos && (
-        <PhotoViewer jobID={jobID} folderUrl={folderUrl} onClose={() => setShowPhotos(false)} />
+        <PhotoViewer jobID={jobID} customerName={job.CustomerName || ''} folderUrl={folderUrl} onClose={() => setShowPhotos(false)} />
       )}
     </div>
   );
 }
 
-function today() { return new Date().toISOString().split('T')[0]; }
+function today() { return localToday(); }
 
 function statusPill(status) {
   const map = {
