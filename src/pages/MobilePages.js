@@ -208,11 +208,12 @@ export function MobileJobs() {
 }
 
 // ── Expenses Page (mobile) ────────────────────────────────────
-const CATS = ['Fuel','Chemical','Parts and Repairs','Supplies','Assets','Taxes and Licenses','Insurance','Utilities','Legal and Professional','Office Expense','Other'];
+const CATS = ['Fuel','Chemical','Parts and Repairs','Supplies','Assets','Taxes and Licenses','Insurance','Utilities','Communications','Legal and Professional','Office Expense','Other'];
 
 export function MobileExpenses() {
   const [jobs, setJobs]       = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [equipment, setEquipment] = useState([]);
   const [modal, setModal]     = useState(false);
   const [saving, setSaving]   = useState(false);
   const [receipt, setReceipt] = useState(null);
@@ -221,8 +222,9 @@ export function MobileExpenses() {
   const [form, setForm] = useState({ Date: today(), Category:'Fuel', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' });
 
   useEffect(() => {
-    Promise.all([api('getJobs'), api('getVendors')]).then(([j, v]) => {
+    Promise.all([api('getJobs'), api('getVendors'), api('getEquipment')]).then(([j, v, eq]) => {
       if (j.status==='ok') setJobs(j.data);
+      if (eq.status==='ok') setEquipment(eq.data.filter(x => !(x.Active === false || String(x.Active).toUpperCase() === 'FALSE')));
       if (v.status==='ok') setVendors(v.data.filter(x => x.Active===true || String(x.Active).toUpperCase()==='TRUE'));
     });
   }, []);
@@ -252,7 +254,7 @@ export function MobileExpenses() {
       setModal(false);
       setReceipt(null);
       setOtherVendor(false);
-      setForm({ Date: today(), Category:'Fuel', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray' });
+      setForm({ Date: today(), Category:'Fuel', Description:'', Amount:'', Vendor:'', JobID:'', Division:'Spray', Equipment:'' });
     } else toast(r.message, 'error');
     setSaving(false);
   };
@@ -296,6 +298,14 @@ export function MobileExpenses() {
                   <input name="Vendor" value={form.Vendor} onChange={f} placeholder="Or type vendor name" style={{ marginTop:6, width:'100%', minHeight:46, padding:'10px 12px', border:'2px solid #d1d5db', borderRadius:8, fontSize:15 }} />
                 )}
               </div>
+              {['Parts and Repairs','Fuel','Insurance','Taxes and Licenses','Assets'].includes(form.Category) && equipment.length > 0 && (
+                <div className="form-group"><label>Equipment {form.Category === 'Parts and Repairs' ? '(which truck/machine?)' : '(optional)'}</label>
+                  <select name="Equipment" value={form.Equipment} onChange={f}>
+                    <option value="">—</option>
+                    {equipment.map(e => <option key={e.EquipmentID} value={e.Name}>{e.Name}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="form-group"><label>Description</label><input name="Description" value={form.Description} onChange={f} /></div>
               <div className="form-group"><label>Job (optional)</label>
                 <select name="JobID" value={form.JobID} onChange={f}>

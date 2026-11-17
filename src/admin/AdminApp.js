@@ -595,6 +595,35 @@ function AdminVendors() {
   );
 }
 
+// ── Year-end export in the bookkeeper's spreadsheet layout ──
+function TaxExportButton({ compact }) {
+  const thisYear = new Date().getFullYear();
+  const [year, setYear] = useState(new Date().getMonth() < 3 ? thisYear - 1 : thisYear); // Jan–Mar: last year's taxes
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const [e, inv, m, j, st] = await Promise.all([api('getExpenses'), api('getInvoices'), api('getMileage'), api('getJobs'), api('getSettings')]);
+      const bad = [e, inv, m, j].find(r => r.status !== 'ok');
+      if (bad) throw new Error(bad.message || 'Could not load data');
+      const { downloadTaxWorkbook } = await import('./taxExport');
+      await downloadTaxWorkbook({ expenses: e.data, invoices: inv.data, mileage: m.data, jobs: j.data }, year, (st.data && st.data.CompanyName) || 'JB Brush Control');
+      toast(`${year} workbook downloaded ✅`);
+    } catch (err) { toast('Export failed: ' + err.message, 'error'); }
+    setBusy(false);
+  };
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:8,...(compact?{}:{background:'white',borderRadius:10,padding:'12px 14px',boxShadow:'0 1px 3px rgba(0,0,0,0.08)',marginBottom:16})}}>
+      {!compact && <div style={{flex:1}}><div style={{fontWeight:700}}>📗 Year-end workbook for taxes</div>
+        <div style={{fontSize:12,color:'#6b7280'}}>Excel file in the "Business Expenses" layout: a tab per category (Fuel, Parts and Repairs, Supplies…), plus Income, Mileage and a Summary.</div></div>}
+      <select value={year} onChange={e=>setYear(Number(e.target.value))} style={{padding:'6px 8px',border:'1.5px solid #d1d5db',borderRadius:6,fontSize:13}}>
+        {[thisYear, thisYear-1, thisYear-2].map(y => <option key={y} value={y}>{y}</option>)}
+      </select>
+      <button className="admin-btn admin-btn-primary" onClick={run} disabled={busy}>{busy ? 'Building…' : '⬇ Export to Excel'}</button>
+    </div>
+  );
+}
+
 // ── Expenses ──────────────────────────────────────────────────
 function AdminExpenses() {
   const { data, loading } = useSheetData('getExpenses');
@@ -606,6 +635,7 @@ function AdminExpenses() {
     { key:'Description', label:'Description',width:180 },
     { key:'Amount',      label:'Amount',     width:100, render: CurrencyCell },
     { key:'Vendor',      label:'Vendor',     width:130 },
+    { key:'Equipment',   label:'Equipment',  width:130 },
     { key:'ReceiptUrl',  label:'Receipt',    width:80,  render: v => v ? <a href={v} target="_blank" rel="noopener noreferrer" style={{color:'#1d6fa4'}}>View</a> : '' },
   ];
   const exportCSV = async () => {
@@ -615,6 +645,7 @@ function AdminExpenses() {
   if (loading) return <p style={{color:'#6b7280'}}>Loading…</p>;
   return (
     <div>
+      <TaxExportButton />
       <div style={{display:'flex',gap:12,marginBottom:16,alignItems:'center'}}>
         <div style={{fontWeight:700}}>Total: <span style={{color:'#dc2626'}}>${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
         <button className="admin-btn admin-btn-outline" onClick={exportCSV} style={{marginLeft:'auto'}}>⬇ Export CSV</button>
@@ -741,6 +772,7 @@ function AdminTax() {
   const periods = [...new Set(summary.map(r=>r.Period))];
   return (
     <div>
+      <TaxExportButton />
       <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
         <div><div style={{fontWeight:700}}>Tax Summary — {year}</div><div style={{fontSize:12,color:'#6b7280'}}>Quarterly by division</div></div>
         <button className="admin-btn admin-btn-outline" onClick={exportCSV} style={{marginLeft:'auto'}}>⬇ Export CSV</button>

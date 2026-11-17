@@ -1,5 +1,5 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4.7
+// JB Brush Control — Google Apps Script Backend v4.8
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
@@ -67,6 +67,16 @@ function sheetToObjects(sheet) {
     result.push(obj);
   }
   return result;
+}
+
+// Add a column header at the end of a tab if it isn't there yet
+function ensureColumn(sheetName, header) {
+  const sheet   = getSheet(sheetName);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf(header) === -1) {
+    sheet.getRange(1, headers.length + 1).setValue(header);
+    invalidate(sheetName);
+  }
 }
 
 function appendRow(sheetName, obj) {
@@ -259,7 +269,7 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4.7' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.8' });
       case 'batch':             return handleBatch(token, body);
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);
@@ -1246,8 +1256,10 @@ function handleAddExpense(token, body) {
     Division:    body.Division    || '',
     ReceiptFileID: body.ReceiptFileID || '',
     ReceiptUrl:  body.ReceiptUrl  || '',
+    Equipment:   body.Equipment   || '',
     Notes:       body.Notes       || ''
   };
+  if (e.Equipment) ensureColumn('Expenses', 'Equipment');
   appendRow('Expenses', e);
   return ok({ message: 'Expense logged', ExpenseID: e.ExpenseID });
 }
