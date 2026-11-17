@@ -14,6 +14,12 @@ export default function MobileHome({ onNavigate, onLogout }) {
   const [showHours, setShowHours]     = useState(false);
   const [showMileage, setShowMileage] = useState(false);
 
+  // Load the common lists in the background (one bundled request) so
+  // My Jobs, Log Hours and Log Mileage open instantly.
+  useEffect(() => {
+    ['getJobs', 'getEquipment', 'getCustomers', 'getSettings'].forEach(a => api(a));
+  }, []);
+
   if (showNewJob)   return <NewJobFlow onComplete={() => { setShowNewJob(false); toast('Job created! ✅'); }} onCancel={() => setShowNewJob(false)} />;
   if (showEstimate) return <NewEstimate onComplete={() => { setShowEst(false); toast('Estimate created! ✅'); }} onCancel={() => setShowEst(false)} />;
 

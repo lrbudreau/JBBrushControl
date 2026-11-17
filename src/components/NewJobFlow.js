@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { api } from '../api';
 import { lookupParcelByAddress } from '../hooks/useGIS';
 import { uploadPhotos } from '../hooks/usePhotos';
@@ -27,19 +27,30 @@ export default function NewJobFlow({ onComplete, onCancel }) {
 
   // ── GIS Search ───────────────────────────────────────────
 
-  const searchAddress = async () => {
-    if (!addressInput.trim()) return;
+  // Suggestions as you type: wait until typing pauses (~0.35s), need 3+
+  // characters, and cancel the previous search when a new letter is typed.
+  const searchCtl = useRef(null);
+  const [searched, setSearched] = useState(false);
+  useEffect(() => {
+    const text = addressInput.trim();
+    if (searchCtl.current) searchCtl.current.abort();
+    if (text.length < 3) { setParcels([]); setSearching(false); setSearched(false); return; }
+    const ctl = new AbortController();
+    searchCtl.current = ctl;
     setSearching(true);
-    setParcels([]);
-    const results = await lookupParcelByAddress(addressInput);
-    if (results.length === 0) {
-      toast('No parcels found — fill in details manually', 'info');
-      setCustomer(c => ({ ...c, Address: addressInput }));
-      setStep(1);
-    } else {
-      setParcels(results);
-    }
-    setSearching(false);
+    const t = setTimeout(async () => {
+      try {
+        const results = await lookupParcelByAddress(text, { signal: ctl.signal });
+        if (!ctl.signal.aborted) { setParcels(results); setSearched(true); setSearching(false); }
+      } catch (e) { /* cancelled because they kept typing */ }
+    }, 350);
+    return () => { clearTimeout(t); ctl.abort(); };
+  }, [addressInput]);
+
+  // Enter / 🔍: use the only match, or go to manual entry if nothing matched
+  const searchAddress = () => {
+    if (parcels.length === 1) return selectParcel(parcels[0]);
+    if (searched && !searching && parcels.length === 0 && addressInput.trim()) skipToManual();
   };
 
   const selectParcel = (parcel) => {
@@ -167,15 +178,22 @@ export default function NewJobFlow({ onComplete, onCancel }) {
             <div style={{ display:'flex', gap:8, marginBottom:16 }}>
               <input style={S.input} value={addressInput} onChange={e => setAddressInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && searchAddress()}
-                placeholder="e.g. 403 N Monroe Ave" autoComplete="off" />
+                placeholder="Start typing, e.g. 403 N Mon…" autoComplete="off" autoFocus />
               <button style={S.searchBtn} onClick={searchAddress} disabled={searching}>
                 {searching ? '…' : '🔍'}
               </button>
             </div>
 
+            {addressInput.trim().length > 0 && addressInput.trim().length < 3 && (
+              <div style={{ fontSize:12, color:'#9ca3af', marginTop:-8, marginBottom:12 }}>Keep typing — suggestions appear after 3 characters</div>
+            )}
+            {searched && !searching && parcels.length === 0 && (
+              <div style={{ fontSize:13, color:'#6b7280', marginTop:-6, marginBottom:12 }}>No Indiana parcels match "{addressInput.trim()}". Keep typing, or enter it manually below.</div>
+            )}
+
             {parcels.length > 0 && (
-              <div style={S.parcelList}>
-                <div style={S.parcelHint}>Select the matching address:</div>
+              <div style={{ ...S.parcelList, opacity: searching ? 0.6 : 1 }}>
+                <div style={S.parcelHint}>Tap the matching address{searching ? ' (updating…)' : ''}:</div>
                 {parcels.map((p, i) => (
                   <button key={i} style={S.parcelRow} onClick={() => selectParcel(p)}>
                     <div style={{ fontWeight:700, fontSize:15 }}>{p.address}</div>

@@ -1,5 +1,5 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4.3
+// JB Brush Control — Google Apps Script Backend v4.4
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
@@ -257,7 +257,8 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4.3' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.4' });
+      case 'batch':             return handleBatch(token, body);
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);
 
@@ -351,6 +352,22 @@ function handleRequest(e) {
     if (e.message === 'FORBIDDEN')    return err('Forbidden', 403);
     return err(e.message, 500);
   }
+}
+
+// ── Batch ────────────────────────────────────────────────────
+// The app asks for several things at once (e.g. a job screen needs jobs,
+// estimates, invoices and settings). Each separate request to Apps Script
+// costs 1–3 seconds, so they're bundled into one request here, and they
+// share the per-request sheet cache too. Read-only ("get…") actions only.
+function handleBatch(token, body) {
+  const reqs = Array.isArray(body.requests) ? body.requests.slice(0, 20) : [];
+  return ok(reqs.map(r => {
+    if (!r || !/^get[A-Z]/.test(String(r.action))) return { status: 'error', code: 400, message: 'Not allowed in batch' };
+    try {
+      const out = handleRequest({ parameter: Object.assign({}, r.params || {}, { action: r.action, token: token }) });
+      return JSON.parse(out.getContent());
+    } catch (e) { return { status: 'error', code: 500, message: e.message }; }
+  }));
 }
 
 // ============================================================
