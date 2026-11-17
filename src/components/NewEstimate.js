@@ -130,11 +130,11 @@ export default function NewEstimate({ onComplete, onCancel, prefillJobID = null 
 function today() { return localToday(); }
 
 const S = {
-  wrap:       { position: 'fixed', inset: 0, background: '#f0f4f0', zIndex: 250, display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' },
-  header:     { background: '#1a4a1a', color: 'white', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 },
+  wrap:       { position: 'fixed', inset: 0, background: '#f0f4f0', zIndex: 250, display: 'flex', flexDirection: 'column' },
+  header:     { background: '#1a4a1a', color: 'white', padding: '14px max(16px, calc((100% - 600px) / 2 + 16px))', display: 'flex', alignItems: 'center', gap: 12 },
   backBtn:    { background: 'rgba(255,255,255,0.15)', border: 'none', color: 'white', width: 36, height: 36, borderRadius: 8, fontSize: 18, cursor: 'pointer' },
   headerTitle:{ fontSize: 16, fontWeight: 700, color: 'white' },
-  body:       { flex: 1, overflowY: 'auto', padding: 16 },
+  body:       { flex: 1, overflowY: 'auto', padding: 16, width:'100%', maxWidth:600, margin:'0 auto', boxSizing:'border-box' },
   label:      { fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5, marginTop: 12 },
   input:      { width: '100%', minHeight: 50, padding: '12px 14px', border: '2px solid #d1d5db', borderRadius: 8, fontSize: 16, fontFamily: 'inherit', color: '#111827', background: 'white', display: 'block' },
   dollarSign: { position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 16, pointerEvents: 'none' },

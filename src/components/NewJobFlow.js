@@ -384,15 +384,15 @@ export default function NewJobFlow({ onComplete, onCancel }) {
 
 
 const S = {
-  wrap:       { position:'fixed', inset:0, background:'#f0f4f0', zIndex:300, display:'flex', flexDirection:'column', maxWidth:480, margin:'0 auto' },
-  header:     { background:'#1a4a1a', color:'white', padding:'14px 16px', display:'flex', alignItems:'center', gap:12 },
+  wrap:       { position:'fixed', inset:0, background:'#f0f4f0', zIndex:300, display:'flex', flexDirection:'column' },
+  header:     { background:'#1a4a1a', color:'white', padding:'14px max(16px, calc((100% - 600px) / 2 + 16px))', display:'flex', alignItems:'center', gap:12 },
   backBtn:    { background:'rgba(255,255,255,0.15)', border:'none', color:'white', width:36, height:36, borderRadius:8, fontSize:18, cursor:'pointer', flexShrink:0 },
   headerTitle:{ fontSize:16, fontWeight:700 },
   headerSub:  { fontSize:11, color:'rgba(255,255,255,0.6)' },
   dots:       { marginLeft:'auto', display:'flex', gap:5 },
   dot:        { width:8, height:8, borderRadius:'50%', transition:'background 0.2s' },
-  body:       { flex:1, overflowY:'auto', padding:16 },
-  footer:     { padding:'12px 16px', background:'white', borderTop:'1px solid #e5e7eb' },
+  body:       { flex:1, overflowY:'auto', padding:16, width:'100%', maxWidth:600, margin:'0 auto', boxSizing:'border-box' },
+  footer:     { padding:'12px max(16px, calc((100% - 600px) / 2 + 16px))', background:'white', borderTop:'1px solid #e5e7eb' },
   stepTitle:  { fontSize:20, fontWeight:800, color:'#1a4a1a', marginBottom:6 },
   stepSub:    { fontSize:13, color:'#6b7280', marginBottom:16, lineHeight:1.5 },
   label:      { fontSize:13, fontWeight:600, color:'#374151', marginBottom:5, marginTop:12 },

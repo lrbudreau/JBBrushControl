@@ -394,12 +394,12 @@ function statusPill(status) {
 }
 
 const S = {
-  wrap:        { position:'fixed', inset:0, background:'#f0f4f0', zIndex:200, display:'flex', flexDirection:'column', maxWidth:480, margin:'0 auto', overflowY:'auto' },
-  header:      { background:'#1a4a1a', color:'white', padding:'14px 16px', display:'flex', alignItems:'center', gap:12, flexShrink:0 },
+  wrap:        { position:'fixed', inset:0, background:'#f0f4f0', zIndex:200, display:'flex', flexDirection:'column', overflowY:'auto' },
+  header:      { background:'#1a4a1a', color:'white', padding:'14px max(16px, calc((100% - 720px) / 2 + 14px))', display:'flex', alignItems:'center', gap:12, flexShrink:0 },
   backBtn:     { background:'rgba(255,255,255,0.15)', border:'none', color:'white', width:36, height:36, borderRadius:8, fontSize:18, cursor:'pointer', flexShrink:0 },
   headerTitle: { fontSize:16, fontWeight:700, color:'white' },
   headerSub:   { fontSize:11, color:'rgba(255,255,255,0.6)' },
-  body:        { padding:14, flex:1 },
+  body:        { padding:14, flex:1, width:'100%', maxWidth:720, margin:'0 auto', boxSizing:'border-box' },
   card:        { background:'white', borderRadius:10, padding:'14px 16px', marginBottom:10, boxShadow:'0 1px 3px rgba(0,0,0,0.08)' },
   cardLabel:   { fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:8 },
   infoRow:     { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'4px 0', fontSize:14, borderBottom:'1px solid #f3f4f6' },
