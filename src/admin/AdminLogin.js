@@ -22,7 +22,7 @@ export default function AdminLogin({ onLogin }) {
     } else if (r.status === 'ok') {
       setError('This account does not have admin access.');
     } else {
-      setError('Incorrect name or PIN. Please try again.');
+      setError(r.code === 429 ? r.message : r.code === 401 ? 'Incorrect name or PIN. Please try again.' : (r.message || 'Could not reach the server. Check your connection.'));
     }
     setLoading(false);
   };

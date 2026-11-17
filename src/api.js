@@ -1,27 +1,84 @@
 import { CONFIG } from './config';
 
-export async function api(action, params = {}, body = null) {
+// ── Speed-ups ─────────────────────────────────────────────────
+// Each trip to Google Apps Script takes 1–3 seconds, so:
+//  1. Requests made at the same moment are bundled into ONE trip ("batch").
+//  2. Results are remembered for 30 seconds, so going back and forth between
+//     screens is instant. Saving anything clears this memory so you never
+//     see your own change missing.
+//  3. Identical requests already on the way are shared, not repeated.
+const CACHE_MS = 30 * 1000;
+const cache    = new Map();   // key -> { t, result }
+const inflight = new Map();   // key -> Promise
+let queue = [];
+let timer = null;
+let batchSupported = true;
+
+function getToken() {
   // Admin uses localStorage, mobile uses sessionStorage
-  const token = localStorage.getItem('jb_token') || sessionStorage.getItem('jb_token');
+  return localStorage.getItem('jb_token') || sessionStorage.getItem('jb_token');
+}
+
+async function rawGet(action, params, token) {
   try {
-    if (body !== null) {
-      const res = await fetch(CONFIG.API_URL, {
-        method: 'POST',
-        body: JSON.stringify({ action, token, ...body }),
-      });
-      return await res.json();
-    } else {
-      const qs = new URLSearchParams({
-        action,
-        ...(token ? { token } : {}),
-        ...params
-      }).toString();
-      const res = await fetch(`${CONFIG.API_URL}?${qs}`);
-      return await res.json();
-    }
+    const qs = new URLSearchParams({ action, ...(token ? { token } : {}), ...params }).toString();
+    const res = await fetch(`${CONFIG.API_URL}?${qs}`);
+    return await res.json();
   } catch (e) {
     return { status: 'error', message: e.message };
   }
+}
+
+async function rawPost(action, body, token) {
+  try {
+    const res = await fetch(CONFIG.API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action, token, ...body }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { status: 'error', message: e.message };
+  }
+}
+
+async function flush() {
+  const items = queue; queue = []; timer = null;
+  const token = getToken();
+  const oneByOne = () => items.forEach(it => rawGet(it.action, it.params, token).then(it.resolve));
+  if (items.length === 1 || !batchSupported) return oneByOne();
+  const r = await rawPost('batch', { requests: items.map(it => ({ action: it.action, params: it.params })) }, token);
+  if (r.status === 'ok' && Array.isArray(r.data)) {
+    items.forEach((it, i) => it.resolve(r.data[i] || { status: 'error', message: 'No response' }));
+  } else {
+    if (/Unknown action/i.test(r.message || '')) batchSupported = false; // older backend
+    oneByOne();
+  }
+}
+
+export function clearApiCache() { cache.clear(); }
+
+export async function api(action, params = {}, body = null) {
+  // Saving / changing something: send now, and forget remembered results
+  if (body !== null) {
+    cache.clear();
+    const r = await rawPost(action, body, getToken());
+    cache.clear();
+    return r;
+  }
+  const key = action + '?' + JSON.stringify(params);
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.t < CACHE_MS) return hit.result;
+  if (inflight.has(key)) return inflight.get(key);
+  const p = new Promise(resolve => {
+    queue.push({ action, params, resolve });
+    if (!timer) timer = setTimeout(flush, 15);
+  }).then(r => {
+    inflight.delete(key);
+    if (r.status === 'ok') cache.set(key, { t: Date.now(), result: r });
+    return r;
+  });
+  inflight.set(key, p);
+  return p;
 }
 
 // Mobile session — clears when browser closes
@@ -34,6 +91,7 @@ export function saveSession(token, user) {
 }
 
 export function clearSession() {
+  cache.clear();
   sessionStorage.removeItem('jb_token');
   sessionStorage.removeItem('jb_user');
   localStorage.removeItem('jb_token');
