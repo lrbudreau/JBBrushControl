@@ -1,14 +1,28 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4
+// JB Brush Control — Google Apps Script Backend v4.1
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
 
 // ── Core helpers ─────────────────────────────────────────────
 
+// Open the spreadsheet once per request, and read each tab at most once.
+// (Before, every lookup re-read a whole tab — e.g. loading 50 invoices read
+// the Estimates, Jobs and Customers tabs 150 times — which made the app slow.)
+let _ss = null;
+const _cache = {};
+
 function getSheet(name) {
-  return SpreadsheetApp.openById(SS_ID).getSheetByName(name);
+  if (!_ss) _ss = SpreadsheetApp.openById(SS_ID);
+  return _ss.getSheetByName(name);
 }
+
+function readSheet(name) {
+  if (!_cache[name]) _cache[name] = sheetToObjects(getSheet(name));
+  return _cache[name];
+}
+
+function invalidate(name) { delete _cache[name]; }
 
 function getSetting(key) {
   const sheet = getSheet('Settings');
@@ -25,16 +39,31 @@ function setSetting(key, value) {
   if (idx !== -1) sheet.getRange(2, idx + 1).setValue(value);
 }
 
+// Google Sheets turns "2026-11-17" into a Date object. Comparing a Date with a
+// text date ("2026-11-01") is always false, which broke every date filter
+// (Hours search, dashboard "this month", Tax Summary). Turn date-only cells
+// back into "yyyy-MM-dd" text so comparisons and display work.
+function normalizeCell(v, tz) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    if (Utilities.formatDate(v, tz, 'HH:mm:ss') === '00:00:00') {
+      return Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+    }
+    return v.toISOString();
+  }
+  return v;
+}
+
 function sheetToObjects(sheet) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return [];
+  const tz = Session.getScriptTimeZone();
   const headers = data[0];
   const result  = [];
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (row.every(c => c === '' || c === null || c === undefined)) continue;
     const obj = {};
-    headers.forEach((h, j) => { obj[h] = row[j] ?? ''; });
+    headers.forEach((h, j) => { obj[h] = normalizeCell(row[j] ?? '', tz); });
     result.push(obj);
   }
   return result;
@@ -44,6 +73,7 @@ function appendRow(sheetName, obj) {
   const sheet   = getSheet(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   sheet.appendRow(headers.map(h => obj[h] ?? ''));
+  invalidate(sheetName);
 }
 
 function updateRecord(sheetName, idField, idValue, updates) {
@@ -57,6 +87,7 @@ function updateRecord(sheetName, idField, idValue, updates) {
       headers.forEach((h, j) => {
         if (updates[h] !== undefined) sheet.getRange(i + 1, j + 1).setValue(updates[h]);
       });
+      invalidate(sheetName);
       return true;
     }
   }
@@ -72,6 +103,7 @@ function deleteRecord(sheetName, idField, idValue) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][idCol]) === String(idValue)) {
       sheet.deleteRow(i + 1);
+      invalidate(sheetName);
       return true;
     }
   }
@@ -79,7 +111,7 @@ function deleteRecord(sheetName, idField, idValue) {
 }
 
 function findRecord(sheetName, idField, idValue) {
-  return sheetToObjects(getSheet(sheetName)).find(r => String(r[idField]) === String(idValue)) || null;
+  return readSheet(sheetName).find(r => String(r[idField]) === String(idValue)) || null;
 }
 
 function generateID(prefix) {
@@ -91,6 +123,16 @@ function today() {
 }
 
 function nowISO() { return new Date().toISOString(); }
+
+// IRS standard business mileage rate ($/mile) for the date of the trip.
+// 2026 changed mid-year: 72.5¢ Jan 1–Jun 30, 76¢ from Jul 1.
+function irsMileageRate(dateStr) {
+  const d = String(dateStr || today()).slice(0, 10);
+  if (d >= '2026-07-01') return 0.76;
+  if (d >= '2026-01-01') return 0.725;
+  if (d >= '2025-01-01') return 0.70;
+  return 0.67;
+}
 
 function getNextNumber(numKey, prefix) {
   const current = parseInt(getSetting(numKey)) || 1;
@@ -125,7 +167,7 @@ function validateToken(token) {
   try {
     const decoded = Utilities.newBlob(Utilities.base64Decode(token)).getDataAsString();
     const [userID, pinHash] = decoded.split(':');
-    const users = sheetToObjects(getSheet('Users'));
+    const users = readSheet('Users');
     return users.find(u =>
       u.UserID === userID &&
       String(u.PIN) === String(pinHash) &&
@@ -215,7 +257,7 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.1' });
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);
 
@@ -333,7 +375,7 @@ function handleLogin(body) {
   const { name, pin } = body;
   if (!pin) return err('PIN required');
   const pinHash = hashPIN(pin);
-  const users   = sheetToObjects(getSheet('Users'));
+  const users   = readSheet('Users');
   let user;
   if (name) {
     user = users.find(u =>
@@ -372,7 +414,7 @@ function handleVerifyAdminPIN(token, body) {
 
 function handleGetUsers(token) {
   requireRole(token, ['owner', 'admin']);
-  return ok(sheetToObjects(getSheet('Users')).map(u => ({ ...u, PIN: '••••' })));
+  return ok(readSheet('Users').map(u => ({ ...u, PIN: '••••' })));
 }
 
 function handleAddUser(token, body) {
@@ -380,7 +422,7 @@ function handleAddUser(token, body) {
   if (!body.PIN) return err('PIN is required');
   const pinHash = hashPIN(body.PIN);
   // Enforce unique PIN
-  const users = sheetToObjects(getSheet('Users'));
+  const users = readSheet('Users');
   const dup = users.find(u =>
     String(u.PIN) === pinHash &&
     (u.Active === true || String(u.Active).toUpperCase() === 'TRUE')
@@ -400,7 +442,7 @@ function handleUpdateUser(token, body) {
   if (body.PIN && body.PIN !== '••••') {
     const pinHash = hashPIN(body.PIN);
     // Check uniqueness (excluding self)
-    const users = sheetToObjects(getSheet('Users'));
+    const users = readSheet('Users');
     const dup = users.find(u =>
       String(u.PIN) === pinHash &&
       u.UserID !== body.UserID &&
@@ -427,7 +469,7 @@ function handleDeleteUser(token, body) {
 
 function handleClockIn(token, body) {
   const user  = requireAuth(token);
-  const hours = sheetToObjects(getSheet('Hours'));
+  const hours = readSheet('Hours');
   const open  = hours.find(h => String(h.EmployeeID) === user.UserID && !h.ClockOut);
   if (open) return err('Already clocked in since ' + open.ClockIn);
   const entry = {
@@ -453,6 +495,7 @@ function handleClockOut(token, body) {
       sheet.getRange(i + 1, totalCol + 1).setValue(total);
       if (body.JobID) sheet.getRange(i + 1, hdrs.indexOf('JobID') + 1).setValue(body.JobID);
       if (body.Notes) sheet.getRange(i + 1, hdrs.indexOf('Notes') + 1).setValue(body.Notes);
+      invalidate('Hours');
       return ok({ message: 'Clocked out', TotalHours: total });
     }
   }
@@ -461,7 +504,7 @@ function handleClockOut(token, body) {
 
 function handleGetHours(token, params) {
   const user = requireAuth(token);
-  let hours  = sheetToObjects(getSheet('Hours')).map(h => {
+  let hours  = readSheet('Hours').map(h => {
     const emp = lookupUser(h.EmployeeID);
     return { ...h, EmployeeName: emp ? emp.Name : h.EmployeeID };
   });
@@ -496,7 +539,7 @@ function handleAddHoursEntry(token, body) {
 
 function handleGetCustomers(token, params) {
   requireAuth(token);
-  let c = sheetToObjects(getSheet('Customers'));
+  let c = readSheet('Customers');
   if (params.division)   c = c.filter(x => x.Division === params.division || x.Division === 'Both');
   if (params.activeOnly === 'true') c = c.filter(x => String(x.Active).toUpperCase() === 'TRUE');
   return ok(c);
@@ -533,7 +576,7 @@ function handleDeleteCustomer(token, body) {
 
 function handleGetJobs(token, params) {
   requireAuth(token);
-  let jobs = sheetToObjects(getSheet('Jobs')).map(enrichJob);
+  let jobs = readSheet('Jobs').map(enrichJob);
   if (params.division)   jobs = jobs.filter(j => j.Division === params.division);
   if (params.status)     jobs = jobs.filter(j => j.Status === params.status);
   if (params.customerID) jobs = jobs.filter(j => j.CustomerID === params.customerID);
@@ -551,6 +594,7 @@ function handleAddJob(token, body) {
     Description: body.Description || '',
     Status:      body.Status      || 'Estimate',
     Priority:    body.Priority    || 'Normal',
+    JobDate:     body.JobDate     || '',
     Notes:       body.Notes       || ''
   };
   appendRow('Jobs', job);
@@ -559,7 +603,7 @@ function handleAddJob(token, body) {
 
 function handleUpdateJob(token, body) {
   requireAuth(token);
-  const allowed = ['CustomerID','Division','Description','Status','Priority','Notes'];
+  const allowed = ['CustomerID','Division','Description','Status','Priority','JobDate','Notes'];
   const updates = {};
   allowed.forEach(k => { if (body[k] !== undefined) updates[k] = body[k]; });
   return updateRecord('Jobs', 'JobID', body.JobID, updates)
@@ -579,7 +623,7 @@ function handleDeleteJob(token, body) {
 
 function handleGetEstimates(token, params) {
   requireAuth(token);
-  let ests = sheetToObjects(getSheet('Estimates')).map(enrichEstimate);
+  let ests = readSheet('Estimates').map(enrichEstimate);
   if (params.jobID)  ests = ests.filter(e => e.JobID === params.jobID);
   if (params.status) ests = ests.filter(e => e.Status === params.status);
   return ok(ests);
@@ -601,6 +645,7 @@ function handleAddEstimate(token, body) {
     EstimateID:   estID,
     JobID:        body.JobID   || '',
     Version:      'Initial',
+    EstimateDate: body.EstimateDate || today(),
     LineItems:    typeof body.LineItems === 'object' ? JSON.stringify(body.LineItems) : (body.LineItems || ''),
     Subtotal:     subtotal,
     TaxRate:      taxRate,
@@ -626,7 +671,9 @@ function handleAcceptEstimate(token, body) {
   const est = findRecord('Estimates', 'EstimateID', body.EstimateID);
   if (!est) return err('Estimate not found', 404);
   updateRecord('Estimates', 'EstimateID', body.EstimateID, { Status: 'Accepted', ApprovedDate: today() });
-  updateRecord('Jobs', 'JobID', est.JobID, { Status: 'Scheduled' });
+  const jobUpdates = { Status: 'Scheduled' };
+  if (body.JobDate) jobUpdates.JobDate = body.JobDate;   // date picked when accepting
+  updateRecord('Jobs', 'JobID', est.JobID, jobUpdates);
   return ok({ message: 'Estimate accepted, job scheduled', JobID: est.JobID });
 }
 
@@ -669,6 +716,7 @@ function handleRejectEstimate(token, body) {
     }
   }
   
+  invalidate('Estimates'); invalidate('Jobs');
   Logger.log('Reject estimate: ' + body.EstimateID + ', jobID: ' + jobID + ', jobFound: ' + jobFound);
   
   return ok({ message: 'Estimate rejected, job canceled', JobID: jobID, jobFound: jobFound });
@@ -744,7 +792,7 @@ function handleConvertToInvoice(token, body) {
 
 function handleGetInvoices(token, params) {
   requireAuth(token);
-  let invs = sheetToObjects(getSheet('Invoices')).map(enrichInvoice);
+  let invs = readSheet('Invoices').map(enrichInvoice);
   if (params.status)     invs = invs.filter(i => i.Status === params.status);
   if (params.division)   invs = invs.filter(i => i.Division === params.division);
   if (params.customerID) invs = invs.filter(i => i.CustomerID === params.customerID);
@@ -829,7 +877,7 @@ function handleMarkPaid(token, body) {
 
 function handleGetInvoiceLog(token, params) {
   requireAuth(token);
-  let logs = sheetToObjects(getSheet('InvoiceLog'));
+  let logs = readSheet('InvoiceLog');
   if (params.invoiceID) logs = logs.filter(l => l.invoiceID === params.invoiceID);
   return ok(logs);
 }
@@ -840,7 +888,7 @@ function handleGetInvoiceLog(token, params) {
 
 function handleGetVendors(token) {
   requireAuth(token);
-  return ok(sheetToObjects(getSheet('Vendors')));
+  return ok(readSheet('Vendors'));
 }
 
 function handleAddVendor(token, body) {
@@ -876,7 +924,7 @@ function handleDeleteVendor(token, body) {
 
 function handleGetEquipment(token) {
   requireAuth(token);
-  return ok(sheetToObjects(getSheet('Equipment')));
+  return ok(readSheet('Equipment'));
 }
 
 function handleAddEquipment(token, body) {
@@ -914,7 +962,7 @@ function handleDeleteEquipment(token, body) {
 
 function handleGetMileage(token, params) {
   const user = requireAuth(token);
-  let miles  = sheetToObjects(getSheet('Mileage')).map(m => {
+  let miles  = readSheet('Mileage').map(m => {
     const equip = findRecord('Equipment', 'EquipmentID', m.EquipmentID);
     const emp   = lookupUser(m.EmployeeID);
     return { ...m, TruckName: equip ? equip.Name : (m.TruckName || ''), DriverName: emp ? emp.Name : m.EmployeeID };
@@ -932,7 +980,6 @@ function handleAddMileage(token, body) {
   const start = parseFloat(body.StartMiles) || 0;
   const end   = parseFloat(body.EndMiles)   || 0;
   const total = parseFloat(body.TotalMiles) || Math.max(0, end - start);
-  const rate  = parseFloat(getSetting('MileageRate')) || 0.67;
   const entry = {
     MileageID:   generateID('MIL'),
     Date:        body.Date        || today(),
@@ -948,7 +995,7 @@ function handleAddMileage(token, body) {
     Rounds:      parseInt(body.Rounds) || 1
   };
   appendRow('Mileage', entry);
-  return ok({ message: 'Mileage logged', TotalMiles: total, Deduction: Math.round(total * rate * 100) / 100 });
+  return ok({ message: 'Mileage logged', TotalMiles: total, Deduction: Math.round(total * irsMileageRate(entry.Date) * 100) / 100 });
 }
 
 function handleDeleteMileage(token, body) {
@@ -965,7 +1012,7 @@ function handleDeleteMileage(token, body) {
 
 function handleGetExpenses(token, params) {
   requireAuth(token);
-  let e = sheetToObjects(getSheet('Expenses'));
+  let e = readSheet('Expenses');
   if (params.startDate) e = e.filter(x => x.Date >= params.startDate);
   if (params.endDate)   e = e.filter(x => x.Date <= params.endDate);
   if (params.category)  e = e.filter(x => x.Category === params.category);
@@ -1012,7 +1059,7 @@ function handleDeleteExpense(token, body) {
 function handleGetLicenses(token) {
   requireAuth(token);
   const now = new Date();
-  return ok(sheetToObjects(getSheet('Licenses')).map(lic => {
+  return ok(readSheet('Licenses').map(lic => {
     const days = Math.ceil((new Date(lic.ExpirationDate) - now) / 86400000);
     return { ...lic, DaysUntilExpiry: days, ExpiryWarning: days <= 60 };
   }));
@@ -1067,7 +1114,7 @@ function handleAddPhoto(token, body) {
 
 function handleGetPhotos(token, params) {
   requireAuth(token);
-  let photos = sheetToObjects(getSheet('Photos'));
+  let photos = readSheet('Photos');
   const jobID     = params.jobID     || params.JobID;
   const expenseID = params.expenseID || params.ExpenseID;
   if (jobID)     photos = photos.filter(p => String(p.JobID)     === String(jobID));
@@ -1089,17 +1136,18 @@ function handleGetDashboard(token) {
   requireAuth(token);
   const now        = new Date();
   const monthStart = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 1), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const jobs     = sheetToObjects(getSheet('Jobs'));
-  const invoices = sheetToObjects(getSheet('Invoices'));
-  const hours    = sheetToObjects(getSheet('Hours'));
-  const expenses = sheetToObjects(getSheet('Expenses'));
-  const mileage  = sheetToObjects(getSheet('Mileage'));
-  const licenses = sheetToObjects(getSheet('Licenses'));
+  const jobs     = readSheet('Jobs');
+  const invoices = readSheet('Invoices');
+  const hours    = readSheet('Hours');
+  const expenses = readSheet('Expenses');
+  const mileage  = readSheet('Mileage');
+  const licenses = readSheet('Licenses');
   const jobsMonth   = jobs.filter(j => j.JobDate >= monthStart);
   const outstanding = invoices.filter(i => i.Status === 'Awaiting Payment');
   const paidMonth   = invoices.filter(i => i.Status === 'Paid' && i.PaidDate >= monthStart);
   const clockedIn   = hours.filter(h => h.ClockIn && !h.ClockOut);
   const expiring    = licenses.filter(l => {
+    if (!(l.Active === true || String(l.Active).toUpperCase() === 'TRUE')) return false;
     const days = Math.ceil((new Date(l.ExpirationDate) - now) / 86400000);
     return days >= 0 && days <= 60;
   });
@@ -1126,17 +1174,16 @@ function handleGetDashboard(token) {
 
 function handleGetTaxSummary(token, params) {
   requireRole(token, ['owner', 'admin']);
-  return ok(sheetToObjects(getSheet('Tax_Summary')));
+  return ok(readSheet('Tax_Summary'));
 }
 
 function handleRefreshTaxSummary(token, params) {
   requireRole(token, ['owner', 'admin']);
   const year        = params.year || String(new Date().getFullYear());
-  const invoices    = sheetToObjects(getSheet('Invoices'));
-  const expenses    = sheetToObjects(getSheet('Expenses'));
-  const mileage     = sheetToObjects(getSheet('Mileage'));
-  const hours       = sheetToObjects(getSheet('Hours'));
-  const mileageRate = parseFloat(getSetting('MileageRate')) || 0.67;
+  const invoices    = readSheet('Invoices');
+  const expenses    = readSheet('Expenses');
+  const mileage     = readSheet('Mileage');
+  const hours       = readSheet('Hours');
   const sheet       = getSheet('Tax_Summary');
   const headers     = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
   if (sheet.getLastRow() > 1) sheet.getRange(2,1,sheet.getLastRow()-1,sheet.getLastColumn()).clearContent();
@@ -1144,7 +1191,7 @@ function handleRefreshTaxSummary(token, params) {
   let count = 0;
   for (let q = 1; q <= 4; q++) {
     const qStart = year+'-'+String((q-1)*3+1).padStart(2,'0')+'-01';
-    const qEnd   = q===4 ? year+'-12-31' : year+'-'+String(q*3).padStart(2,'0')+'-30';
+    const qEnd   = year+'-'+['03-31','06-30','09-30','12-31'][q-1];
     divisions.forEach(div => {
       const fd   = r => div==='All'||r.Division===div;
       const qInv = invoices.filter(i=>i.Status==='Paid'&&i.PaidDate>=qStart&&i.PaidDate<=qEnd&&fd(i));
@@ -1155,19 +1202,20 @@ function handleRefreshTaxSummary(token, params) {
       const exp  = qExp.reduce((s,e)=>s+(parseFloat(e.Amount)||0),0);
       const fuel = qExp.filter(e=>e.Category==='Fuel').reduce((s,e)=>s+(parseFloat(e.Amount)||0),0);
       const chem = qExp.filter(e=>e.Category==='Chemical').reduce((s,e)=>s+(parseFloat(e.Amount)||0),0);
-      const mil  = qMil.reduce((s,m)=>s+(parseFloat(m.TotalMiles)||0),0);
+      const milDed = qMil.reduce((s,m)=>s+(parseFloat(m.TotalMiles)||0)*irsMileageRate(m.Date),0);
       const hrs  = qHrs.reduce((s,h)=>s+(parseFloat(h.TotalHours)||0),0);
       const row  = {
         Period:'Q'+q+' '+year, Division:div,
         TotalRevenue:Math.round(rev*100)/100, TotalExpenses:Math.round(exp*100)/100,
         FuelCosts:Math.round(fuel*100)/100, ChemicalCosts:Math.round(chem*100)/100,
-        LaborCosts:Math.round(hrs*100)/100, MileageDeduction:Math.round(mil*mileageRate*100)/100,
+        LaborCosts:Math.round(hrs*100)/100, MileageDeduction:Math.round(milDed*100)/100,
         NetIncome:Math.round((rev-exp)*100)/100, Notes:''
       };
       sheet.appendRow(headers.map(h=>row[h]??''));
       count++;
     });
   }
+  invalidate('Tax_Summary');
   return ok({ message:'Tax summary refreshed', periods:count });
 }
 
@@ -1193,7 +1241,7 @@ function handleExportCSV(token, params) {
 // ============================================================
 
 function sendLicenseExpiryReminders() {
-  const licenses   = sheetToObjects(getSheet('Licenses'));
+  const licenses   = readSheet('Licenses');
   const now        = new Date();
   const company    = getSetting('CompanyName') || 'JB Brush Control';
   const ownerEmail = getSetting('Email');
