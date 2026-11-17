@@ -105,7 +105,7 @@ export default function Register({ code, onDone, onCancel }) {
                   onChange={e => setPin2(e.target.value.replace(/\D/g, '').slice(0, 4))} />
               </div>
             </div>
-            <div style={S.hint}>You'll use this PIN to sign in. Don't share it.</div>
+            <div style={S.hint}>You'll use this PIN to sign in. Avoid easy ones like 1234 or 1111, and don't share it.</div>
 
             <button style={{ ...S.btn, marginTop: 16, opacity: saving ? 0.6 : 1 }} onClick={submit} disabled={saving}>
               {saving ? 'Creating account…' : 'Create account'}

@@ -1,5 +1,5 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4.6
+// JB Brush Control — Google Apps Script Backend v4.7
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
@@ -259,7 +259,7 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4.6' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.7' });
       case 'batch':             return handleBatch(token, body);
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);
@@ -623,6 +623,18 @@ function handleCheckInvite(code) {
 }
 
 // Public: create the account from an invite, and log them in
+// PINs anyone would try first: 0000, 1111 … 9999, 1234-style runs (up or
+// down), and a few favorites. Refused with the same message as a PIN that's
+// already in use, so nobody can tell someone else has it.
+function isEasyPIN(pin) {
+  if (/^(\d)\1{3}$/.test(pin)) return true;                       // 1111
+  const d = pin.split('').map(Number);
+  const up = d.every((x, i) => i === 0 || x === d[i - 1] + 1);
+  const down = d.every((x, i) => i === 0 || x === d[i - 1] - 1);
+  if (up || down) return true;                                     // 1234, 4321
+  return ['1212','1122','1313','2580','0852','1004','2000','6969','1010','2020','0101','1357','2468','7777'].includes(pin);
+}
+
 function handleRegisterWithInvite(body) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -633,6 +645,9 @@ function handleRegisterWithInvite(body) {
     const pin  = String(body.PIN || '');
     if (!name) return err('Please enter your name');
     if (!/^\d{4}$/.test(pin)) return err('PIN must be exactly 4 digits');
+
+    const PICK_ANOTHER = 'That PIN is too easy to guess. Please pick a different one.';
+    if (isEasyPIN(pin)) return err(PICK_ANOTHER, 409);
 
     const pinHash = hashPIN(pin);
     const users   = readSheet('Users');
@@ -646,7 +661,7 @@ function handleRegisterWithInvite(body) {
         return err('Too many tries. This invite link no longer works — ask for a new one.', 429);
       }
       props.setProperty(inviteKey(body.code), JSON.stringify(inv));
-      return err('That PIN is already taken. Please pick a different one.', 409);
+      return err(PICK_ANOTHER, 409);   // same wording as an easy PIN — don't reveal it's in use
     }
 
     const user = {
