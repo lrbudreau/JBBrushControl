@@ -1,5 +1,5 @@
 // ============================================================
-// JB Brush Control — Google Apps Script Backend v4.1
+// JB Brush Control — Google Apps Script Backend v4.2
 // ============================================================
 
 const SS_ID = '1QFfaMVXt8Y0fTnXFa1o-MXi8_P2mSKWlPHWbZ7gRjDY';
@@ -257,7 +257,7 @@ function handleRequest(e) {
 
     switch (action) {
       // System
-      case 'ping':              return ok({ message: 'JB Brush Control API v4.1' });
+      case 'ping':              return ok({ message: 'JB Brush Control API v4.2' });
       case 'getSettings':       return handleGetSettings(token);
       case 'login':             return handleLogin(body);
 
@@ -1167,8 +1167,12 @@ function handleUploadPhoto(token, body) {
 }
 
 // Run this once from the Apps Script editor to approve Google Drive access.
+// (Creates and deletes a test folder, so it proves the backend can save photos.)
+// After changing permissions, always Deploy → Manage deployments → New version.
 function authorizeDrive() {
-  Logger.log('Drive access OK: ' + DriveApp.getRootFolder().getName());
+  const test = DriveApp.getRootFolder().createFolder('JB test - delete me');
+  test.setTrashed(true);
+  Logger.log('Drive access OK: can create folders');
 }
 
 function handleGetPhotos(token, params) {
