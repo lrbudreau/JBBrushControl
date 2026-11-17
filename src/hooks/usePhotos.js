@@ -48,13 +48,22 @@ export async function uploadPhoto(file, { jobID = '', folder = 'Job', index = 0 
 
 // Upload several photos one at a time. onProgress(done, total)
 export async function uploadPhotos(files, jobID, onProgress) {
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, error = '';
   for (let i = 0; i < files.length; i++) {
     try { await uploadPhoto(files[i], { jobID, index: i }); done++; }
-    catch (e) { console.error('Photo upload failed:', e); failed++; }
+    catch (e) { console.error('Photo upload failed:', e); failed++; error = error || friendlyError(e.message); }
     onProgress && onProgress(done + failed, files.length);
   }
-  return { done, failed };
+  return { done, failed, error };
+}
+
+// Turn backend errors into something that says what to do
+function friendlyError(msg = '') {
+  if (/Unknown action/i.test(msg)) return 'The backend is out of date — deploy a New version in Apps Script.';
+  if (/DriveApp|permission|authoriz/i.test(msg)) return 'Google Drive access not approved — run authorizeDrive in Apps Script.';
+  if (/Unauthorized/i.test(msg)) return 'Your login expired — sign out and back in.';
+  if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) return 'No connection — check signal and try again.';
+  return msg;
 }
 
 // Image addresses for a Drive file shared "anyone with the link".

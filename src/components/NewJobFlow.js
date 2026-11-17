@@ -107,11 +107,11 @@ export default function NewJobFlow({ onComplete, onCancel }) {
       let photoMsg = '';
       if (photos.length > 0) {
         setUploading(true);
-        const { done, failed } = await uploadPhotos(photos.map(p => p.file), jobID,
+        const { done, failed, error } = await uploadPhotos(photos.map(p => p.file), jobID,
           (n, total) => setUploadProgress(`${n} of ${total}`));
         setUploading(false);
         photoMsg = failed === 0 ? ` ${done} photo(s) uploaded.`
-          : ` ${failed} photo(s) didn't upload — open the job and add them again.`;
+          : ` ${failed} photo(s) didn't upload (${error}) — open the job and add them again.`;
       }
 
       // 4. Create estimate if any line items have a description

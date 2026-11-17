@@ -244,7 +244,7 @@ export function MobileExpenses() {
         const result = await uploadPhoto(receipt, { folder: 'Receipts' });
         receiptFileID = result.DriveFileID;
         receiptUrl    = result.DriveUrl;
-      } catch(e) { toast('Receipt upload failed — saving expense without it', 'info'); }
+      } catch(e) { toast('Receipt upload failed (' + e.message + ') — saving expense without it', 'info'); }
     }
     const r = await api('addExpense', {}, { ...form, ReceiptFileID: receiptFileID, ReceiptUrl: receiptUrl });
     if (r.status === 'ok') {
