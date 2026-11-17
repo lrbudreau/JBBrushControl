@@ -334,6 +334,7 @@ function handleRequest(e) {
 
       // Photos
       case 'addPhoto':          return handleAddPhoto(token, body);
+      case 'uploadPhoto':       return handleUploadPhoto(token, body);
       case 'getPhotos':         return handleGetPhotos(token, params);
       case 'deletePhoto':       return handleDeletePhoto(token, body);
 
@@ -1110,6 +1111,64 @@ function handleAddPhoto(token, body) {
   };
   appendRow('Photos', photo);
   return ok({ message: 'Photo logged', PhotoID: photo.PhotoID });
+}
+
+// Photos are sent here from the phone (already shrunk) and saved in the
+// business owner's Google Drive: JB Brush Control / Jobs / "JOB-ID — Customer".
+// No Google sign-in needed on the phone, and every photo ends up in one place.
+const DRIVE_ROOT = 'JB Brush Control';
+
+function getOrCreateFolder(parent, name) {
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+function getJobDriveFolder(jobID) {
+  const job  = lookupJob(jobID);
+  const cust = job ? lookupCustomer(job.CustomerID) : null;
+  const root = getOrCreateFolder(DriveApp.getRootFolder(), DRIVE_ROOT);
+  const jobs = getOrCreateFolder(root, 'Jobs');
+  return getOrCreateFolder(jobs, cust && cust.Name ? jobID + ' — ' + cust.Name : jobID);
+}
+
+function handleUploadPhoto(token, body) {
+  const user = requireAuth(token);
+  if (!body.Data) return err('No photo data');
+  const isReceipt = body.Folder === 'Receipts';
+  if (!isReceipt && !body.JobID) return err('JobID is required');
+
+  const folder = isReceipt
+    ? getOrCreateFolder(getOrCreateFolder(DriveApp.getRootFolder(), DRIVE_ROOT), 'Receipts')
+    : getJobDriveFolder(body.JobID);
+
+  const name = body.FileName || ('photo_' + Date.now() + '.jpg');
+  const blob = Utilities.newBlob(Utilities.base64Decode(body.Data), body.MimeType || 'image/jpeg', name);
+  const file = folder.createFile(blob);
+  // Viewable by link so thumbnails show in the app (may be blocked by some Google Workspace policies)
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+
+  const result = { DriveFileID: file.getId(), DriveUrl: file.getUrl(), FolderUrl: folder.getUrl(), FileName: name };
+
+  if (!isReceipt) {
+    const photo = {
+      PhotoID: generateID('PHT'), JobID: body.JobID, ExpenseID: '',
+      FileName: name, DriveFileID: result.DriveFileID, DriveUrl: result.DriveUrl,
+      ThumbnailUrl: '', UploadedBy: user.UserID, UploadDate: today(), Notes: body.Notes || ''
+    };
+    appendRow('Photos', photo);
+    result.PhotoID = photo.PhotoID;
+    // Put a link to the folder in the job notes (once)
+    const job = lookupJob(body.JobID);
+    if (job && String(job.Notes || '').indexOf('Photos: ') === -1) {
+      updateRecord('Jobs', 'JobID', body.JobID, { Notes: (job.Notes ? job.Notes + '\n' : '') + 'Photos: ' + result.FolderUrl });
+    }
+  }
+  return ok(result);
+}
+
+// Run this once from the Apps Script editor to approve Google Drive access.
+function authorizeDrive() {
+  Logger.log('Drive access OK: ' + DriveApp.getRootFolder().getName());
 }
 
 function handleGetPhotos(token, params) {

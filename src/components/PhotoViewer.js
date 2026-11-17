@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { api, formatDate } from '../api';
-import { getJobFolder, uploadPhoto, requestDriveAccess } from '../hooks/useDrive';
+import { uploadPhotos, thumbUrl, altThumbUrl } from '../hooks/usePhotos';
 import { toast } from './Toast';
 
-export default function PhotoViewer({ jobID, customerName = '', folderUrl, onClose }) {
+export default function PhotoViewer({ jobID, folderUrl, onClose }) {
   const [photos, setPhotos]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState(null);
@@ -19,43 +19,23 @@ export default function PhotoViewer({ jobID, customerName = '', folderUrl, onClo
 
   useEffect(() => { load(); }, [jobID]);
 
+  const [progress, setProgress] = useState('');
+
   const handleFileSelect = async (e) => {
     const files = Array.from(e.target.files);
+    e.target.value = ''; // allow picking the same photo again
     if (!files.length) return;
     setUploading(true);
-    try {
-      await requestDriveAccess();
-      // Use the same folder name NewJobFlow created ("JOB-ID — Customer"),
-      // otherwise added photos land in a second, separate folder.
-      const { folderId } = await getJobFolder(jobID, customerName);
-      for (const file of files) {
-        const result = await uploadPhoto(file, folderId);
-        if (result.id) {
-          await api('addPhoto', {}, {
-            JobID:        jobID,
-            ExpenseID:    '',
-            FileName:     result.name || file.name,
-            DriveFileID:  result.id,
-            DriveUrl:     result.webViewLink || `https://drive.google.com/file/d/${result.id}/view`,
-            ThumbnailUrl: result.thumbnailLink || '',
-          });
-        }
-      }
-      toast(`${files.length} photo(s) uploaded ✅`);
-      load(); // Reload photos
-    } catch (e) {
-      console.error('Upload error:', e);
-      toast('Upload failed: ' + e.message, 'error');
-    }
+    setProgress(`0 of ${files.length}`);
+    const { done, failed } = await uploadPhotos(files, jobID, (n, total) => setProgress(`${n} of ${total}`));
+    if (failed === 0) toast(`${done} photo(s) uploaded ✅`);
+    else toast(`${done} uploaded, ${failed} failed — check signal and try those again`, 'error');
     setUploading(false);
-    e.target.value = ''; // Reset input
+    setProgress('');
+    load();
   };
 
-  // Get Google sign-in done during the tap, before the file picker opens
-  const pickFiles = () => {
-    requestDriveAccess().catch(err => toast(err.message, 'error'));
-    fileRef.current.click();
-  };
+  const pickFiles = () => fileRef.current.click();
 
   return (
     <div style={S.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
@@ -71,7 +51,7 @@ export default function PhotoViewer({ jobID, customerName = '', folderUrl, onClo
               style={S.uploadBtn}
               onClick={pickFiles}
               disabled={uploading}>
-              {uploading ? '⏳ Uploading…' : '+ Add Photos'}
+              {uploading ? `⏳ ${progress}` : '+ Add Photos'}
             </button>
             <button style={S.closeBtn} onClick={onClose}>✕</button>
           </div>
@@ -86,7 +66,7 @@ export default function PhotoViewer({ jobID, customerName = '', folderUrl, onClo
               <p>No photos yet.</p>
               <button style={{ ...S.uploadBtn, marginTop:14, padding:'10px 20px' }}
                 onClick={pickFiles} disabled={uploading}>
-                {uploading ? '⏳ Uploading…' : '+ Add First Photo'}
+                {uploading ? `⏳ Uploading ${progress}` : '+ Add First Photo'}
               </button>
             </div>
           ) : (
@@ -96,10 +76,12 @@ export default function PhotoViewer({ jobID, customerName = '', folderUrl, onClo
                   <div key={photo.PhotoID} style={S.thumb} onClick={() => setSelected(photo)}>
                     {photo.DriveFileID ? (
                       <img
-                        src={`https://lh3.googleusercontent.com/d/${photo.DriveFileID}`}
+                        src={thumbUrl(photo.DriveFileID)}
                         alt={photo.FileName}
+                        loading="lazy"
                         style={{ width:'100%', height:'100%', objectFit:'cover', borderRadius:8 }}
                         onError={e => {
+                          if (!e.target.dataset.retried) { e.target.dataset.retried = '1'; e.target.src = altThumbUrl(photo.DriveFileID); return; }
                           e.target.style.display = 'none';
                           e.target.nextSibling.style.display = 'flex';
                         }}
@@ -134,10 +116,13 @@ export default function PhotoViewer({ jobID, customerName = '', folderUrl, onClo
             </div>
             {selected.DriveFileID ? (
               <img
-                src={`https://lh3.googleusercontent.com/d/${selected.DriveFileID}`}
+                src={thumbUrl(selected.DriveFileID, 1600)}
                 alt={selected.FileName}
                 style={{ width:'100%', borderRadius:8, maxHeight:'60vh', objectFit:'contain' }}
-                onError={e => { e.target.style.display='none'; }}
+                onError={e => {
+                  if (!e.target.dataset.retried) { e.target.dataset.retried = '1'; e.target.src = altThumbUrl(selected.DriveFileID, 1600); return; }
+                  e.target.style.display='none';
+                }}
               />
             ) : (
               <div style={{ ...S.thumbPlaceholder, height:200 }}>

@@ -3,7 +3,7 @@ import PhotoViewer from '../components/PhotoViewer';
 import JobDetail from '../components/JobDetail';
 import { api, localToday, formatDate, irsMileageRate, mileageDeduction } from '../api';
 import { toast } from '../components/Toast';
-import { getJobFolder, uploadPhoto, requestDriveAccess } from '../hooks/useDrive';
+import { uploadPhoto } from '../hooks/usePhotos';
 
 // ── Mileage Page ─────────────────────────────────────────────
 export function MobileMileage() {
@@ -237,20 +237,13 @@ export function MobileExpenses() {
   const save = async () => {
     if (!form.Amount) return toast('Enter an amount', 'error');
     setSaving(true);
-    // Start Google sign-in during the tap so iPhone Safari allows the popup
-    const driveAuth = receipt ? requestDriveAccess() : null;
-    if (driveAuth) driveAuth.catch(() => {});
     let receiptFileID = '', receiptUrl = '';
     // Upload receipt photo if selected
     if (receipt) {
       try {
-        await driveAuth;
-        const rootFolder = await getJobFolder('Receipts', 'Expenses');
-        const result = await uploadPhoto(receipt, rootFolder.folderId);
-        if (result.id) {
-          receiptFileID = result.id;
-          receiptUrl    = result.webViewLink || '';
-        }
+        const result = await uploadPhoto(receipt, { folder: 'Receipts' });
+        receiptFileID = result.DriveFileID;
+        receiptUrl    = result.DriveUrl;
       } catch(e) { toast('Receipt upload failed — saving expense without it', 'info'); }
     }
     const r = await api('addExpense', {}, { ...form, ReceiptFileID: receiptFileID, ReceiptUrl: receiptUrl });
