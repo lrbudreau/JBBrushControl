@@ -27,9 +27,9 @@ export default function PhotoViewer({ jobID, folderUrl, onClose }) {
     if (!files.length) return;
     setUploading(true);
     setProgress(`0 of ${files.length}`);
-    const { done, failed } = await uploadPhotos(files, jobID, (n, total) => setProgress(`${n} of ${total}`));
+    const { done, failed, error } = await uploadPhotos(files, jobID, (n, total) => setProgress(`${n} of ${total}`));
     if (failed === 0) toast(`${done} photo(s) uploaded ✅`);
-    else toast(`${done} uploaded, ${failed} failed — check signal and try those again`, 'error');
+    else toast(`${failed} photo(s) failed: ${error}`, 'error');
     setUploading(false);
     setProgress('');
     load();
