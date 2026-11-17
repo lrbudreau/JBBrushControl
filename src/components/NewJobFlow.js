@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { api } from '../api';
-import { lookupParcelByAddress } from '../hooks/useGIS';
+import { lookupParcelByAddress, getHereOnce, warmUpParcelSearch } from '../hooks/useGIS';
 import { uploadPhotos } from '../hooks/usePhotos';
 import { toast } from './Toast';
 
@@ -31,6 +31,10 @@ export default function NewJobFlow({ onComplete, onCancel }) {
   // characters, and cancel the previous search when a new letter is typed.
   const searchCtl = useRef(null);
   const [searched, setSearched] = useState(false);
+  // Phone location, so nearby addresses are listed first
+  const here = useRef(null);
+  useEffect(() => { warmUpParcelSearch(); getHereOnce().then(h => { here.current = h; }); }, []);
+  const [slow, setSlow] = useState(false);
   useEffect(() => {
     const text = addressInput.trim();
     if (searchCtl.current) searchCtl.current.abort();
@@ -38,13 +42,15 @@ export default function NewJobFlow({ onComplete, onCancel }) {
     const ctl = new AbortController();
     searchCtl.current = ctl;
     setSearching(true);
+    setSlow(false);
+    const slowTimer = setTimeout(() => setSlow(true), 6400);   // 0.4 s pause + 6 s search
     const t = setTimeout(async () => {
       try {
-        const results = await lookupParcelByAddress(text, { signal: ctl.signal });
-        if (!ctl.signal.aborted) { setParcels(results); setSearched(true); setSearching(false); }
+        const results = await lookupParcelByAddress(text, { signal: ctl.signal, near: here.current });
+        if (!ctl.signal.aborted) { clearTimeout(slowTimer); setSlow(false); setParcels(results); setSearched(true); setSearching(false); }
       } catch (e) { /* cancelled because they kept typing */ }
-    }, 350);
-    return () => { clearTimeout(t); ctl.abort(); };
+    }, 400);
+    return () => { clearTimeout(t); clearTimeout(slowTimer); ctl.abort(); };
   }, [addressInput]);
 
   // Enter / 🔍: use the only match, or go to manual entry if nothing matched
@@ -187,6 +193,12 @@ export default function NewJobFlow({ onComplete, onCancel }) {
             {addressInput.trim().length > 0 && addressInput.trim().length < 3 && (
               <div style={{ fontSize:12, color:'#9ca3af', marginTop:-8, marginBottom:12 }}>Keep typing — suggestions appear after 3 characters</div>
             )}
+            {searching && (parcels.length === 0 || slow) && (
+              <div style={{ fontSize:13, color:'#6b7280', marginTop:-6, marginBottom:12 }}>
+                🔍 Searching Indiana property records…
+                {slow && <> The state's server is slow right now. Keep waiting, or <button onClick={skipToManual} style={{ background:'none', border:'none', color:'#1d6fa4', fontWeight:600, padding:0, cursor:'pointer', fontSize:13 }}>enter the address manually</button>.</>}
+              </div>
+            )}
             {searched && !searching && parcels.length === 0 && (
               <div style={{ fontSize:13, color:'#6b7280', marginTop:-6, marginBottom:12 }}>No Indiana parcels match "{addressInput.trim()}". Keep typing, or enter it manually below.</div>
             )}
@@ -198,7 +210,7 @@ export default function NewJobFlow({ onComplete, onCancel }) {
                   <button key={i} style={S.parcelRow} onClick={() => selectParcel(p)}>
                     <div style={{ fontWeight:700, fontSize:15 }}>{p.address}</div>
                     <div style={{ fontSize:13, color:'#6b7280' }}>{p.city}, {p.state} {p.zip}</div>
-                    <div style={{ fontSize:11, color:'#9ca3af' }}>{p.county} County · Parcel {p.parcelNo}</div>
+                    <div style={{ fontSize:11, color:'#9ca3af' }}>{p.county} County · Parcel {p.parcelNo}{p.miles != null ? ` · ${p.miles < 10 ? p.miles.toFixed(1) : Math.round(p.miles)} mi away` : ''}</div>
                   </button>
                 ))}
                 <button style={S.manualBtn} onClick={skipToManual}>None of these — enter manually</button>
