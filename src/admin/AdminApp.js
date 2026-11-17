@@ -714,6 +714,10 @@ function AdminTax() {
 // ── Users ─────────────────────────────────────────────────────
 function AdminUsers() {
   const { data, loading, reload } = useSheetData('getUsers');
+  const { data: invites, reload: reloadInvites } = useSheetData('getInvites');
+  const me = JSON.parse(localStorage.getItem('jb_user') || '{}');
+  const [inviteForm, setInviteForm] = useState(null);   // { Name, Role } while the invite box is open
+  const [newLink, setNewLink]       = useState(null);   // link just created
   const [modal, setModal]   = useState(null);
   const [form, setForm]     = useState({});
   const [saving, setSaving] = useState(false);
@@ -730,6 +734,30 @@ function AdminUsers() {
     setSaving(false);
   };
 
+  const inviteLink = code => `${window.location.origin}/JBBrushControl/?invite=${code}`;
+
+  const createInvite = async () => {
+    setSaving(true);
+    const r = await api('createInvite', {}, inviteForm);
+    setSaving(false);
+    if (r.status !== 'ok') return toast(r.message, 'error');
+    setNewLink({ url: inviteLink(r.data.code), name: r.data.name, role: r.data.role });
+    reloadInvites();
+  };
+
+  const copyLink = async (url) => {
+    try { await navigator.clipboard.writeText(url); toast('Link copied ✅'); }
+    catch { window.prompt('Copy this link:', url); }
+  };
+
+  const shareText = (inv) => `${inv.name ? 'Hi ' + inv.name.split(' ')[0] + '! ' : ''}Here's your link to set up the JB Brush Control app (works once, for 7 days): ${inv.url}`;
+
+  const cancelInvite = async (code) => {
+    if (!window.confirm('Cancel this invite? The link will stop working.')) return;
+    const r = await api('cancelInvite', {}, { code });
+    if (r.status === 'ok') { toast('Invite canceled'); reloadInvites(); } else toast(r.message, 'error');
+  };
+
   const cols = [
     { key:'Name',  label:'Name',  width:140 },
     { key:'Email', label:'Email', width:200 },
@@ -741,10 +769,71 @@ function AdminUsers() {
   return (
     <div>
       <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
-        <button className="admin-btn admin-btn-primary" onClick={()=>{setForm({Name:'',Email:'',PIN:'',Role:'employee'});setModal('add');}}>+ Add User</button>
+        <button className="admin-btn admin-btn-primary" onClick={()=>{setInviteForm({Name:'',Role:'employee'});setNewLink(null);}}>✉️ Invite someone</button>
+        <button className="admin-btn admin-btn-outline" onClick={()=>{setForm({Name:'',Email:'',PIN:'',Role:'employee'});setModal('add');}}>+ Add User directly</button>
         <span style={{fontSize:12,color:'#6b7280'}}>PINs are hashed for security. Enter a new PIN to change it.</span>
       </div>
       <SheetGrid data={data} columns={cols} onRowClick={row=>{setForm({...row,PIN:''});setModal('edit');}} />
+
+      {invites.length > 0 && (
+        <div style={{marginTop:20}}>
+          <div style={{fontWeight:700,marginBottom:8}}>Invites not used yet</div>
+          <SheetGrid data={invites} emptyMessage="No open invites." columns={[
+            { key:'name',      label:'For',        width:140, render: v => v || <span style={{color:'#9ca3af'}}>(anyone)</span> },
+            { key:'role',      label:'Role',       width:100 },
+            { key:'createdBy', label:'Sent by',    width:120 },
+            { key:'expires',   label:'Expires',    width:110, render: v => formatDate(v) },
+            { key:'_a',        label:'',           width:200, render: (_, row) => (
+              <div style={{display:'flex',gap:4}}>
+                <button className="admin-btn admin-btn-outline admin-btn-sm" onClick={()=>copyLink(inviteLink(row.code))}>📋 Copy link</button>
+                <button className="admin-btn admin-btn-danger admin-btn-sm" onClick={()=>cancelInvite(row.code)}>Cancel</button>
+              </div>
+            )},
+          ]} />
+        </div>
+      )}
+
+      {inviteForm && (
+        <div className="admin-modal-overlay" onClick={e=>e.target===e.currentTarget&&setInviteForm(null)}>
+          <div className="admin-modal">
+            <div className="admin-modal-header"><h3>Invite someone</h3><button className="admin-btn admin-btn-outline admin-btn-sm" onClick={()=>setInviteForm(null)}>✕</button></div>
+            <div className="admin-modal-body">
+              {!newLink ? (
+                <>
+                  <p style={{fontSize:13,color:'#6b7280',marginBottom:12}}>You'll get a link to text or email them. They open it on their phone, enter their name, and pick their own PIN. The link works once and expires in 7 days.</p>
+                  <div className="admin-form-grid">
+                    <div className="admin-field"><label>Their name (optional)</label><input value={inviteForm.Name} onChange={e=>setInviteForm(p=>({...p,Name:e.target.value}))} placeholder="They can fill it in" /></div>
+                    <div className="admin-field"><label>Role</label>
+                      <select value={inviteForm.Role} onChange={e=>setInviteForm(p=>({...p,Role:e.target.value}))}>
+                        <option value="employee">Employee</option>
+                        <option value="admin">Admin</option>
+                        {me.Role === 'owner' && <option value="owner">Owner</option>}
+                      </select>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p style={{marginBottom:10}}>✅ Invite created{newLink.name ? ` for ${newLink.name}` : ''}. Send them this link:</p>
+                  <input readOnly value={newLink.url} onFocus={e=>e.target.select()} style={{width:'100%',padding:'8px 10px',border:'1.5px solid #d1d5db',borderRadius:6,fontSize:13,marginBottom:12}} />
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    <button className="admin-btn admin-btn-primary" onClick={()=>copyLink(newLink.url)}>📋 Copy link</button>
+                    <a className="admin-btn admin-btn-outline" href={`sms:?&body=${encodeURIComponent(shareText(newLink))}`}>💬 Text it</a>
+                    <a className="admin-btn admin-btn-outline" href={`mailto:?subject=${encodeURIComponent('Your JB Brush Control app link')}&body=${encodeURIComponent(shareText(newLink))}`}>✉️ Email it</a>
+                    {navigator.share && <button className="admin-btn admin-btn-outline" onClick={()=>navigator.share({ text: shareText(newLink) }).catch(()=>{})}>📤 Share…</button>}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="admin-modal-footer">
+              {!newLink
+                ? <><button className="admin-btn admin-btn-outline" onClick={()=>setInviteForm(null)}>Cancel</button>
+                    <button className="admin-btn admin-btn-primary" onClick={createInvite} disabled={saving}>{saving?'Creating…':'Create invite link'}</button></>
+                : <button className="admin-btn admin-btn-primary" onClick={()=>{setInviteForm(null);setNewLink(null);}}>Done</button>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="admin-modal-overlay" onClick={e=>e.target===e.currentTarget&&setModal(null)}>
